@@ -5,7 +5,6 @@ function Build( event )
     local ability_name = ability:GetAbilityName()
     local AbilityKV = BuildingHelper.AbilityKVs
     local UnitKV = BuildingHelper.UnitKVs
-    local casterKV = GameRules.UnitKV[caster:GetUnitName()]
 
     if caster:IsIdle() then
         caster:Interrupt()
