@@ -62,6 +62,7 @@ function BuildingHelper:Init()
 
     -- Lua modifiers
     LinkLuaModifier("modifier_out_of_world", "libraries/modifiers/modifier_out_of_world", LUA_MODIFIER_MOTION_NONE)
+    LinkLuaModifier("modifier_builder_hidden", "libraries/modifiers/modifier_builder_hidden", LUA_MODIFIER_MOTION_NONE)
     
     BuildingHelper.KV = {} -- Merge KVs into a single table
     BuildingHelper:ParseKV(BuildingHelper.AbilityKVs, BuildingHelper.KV)
@@ -296,6 +297,7 @@ function BuildingHelper:OrderFilter(order)
     local order_type = order.order_type
     local units = order.units
     local abilityIndex = order.entindex_ability
+    local unit = EntIndexToHScript(units["0"])
 
     -- Cancel queue on Stop and Hold
     if order_type == DOTA_UNIT_ORDER_STOP or order_type == DOTA_UNIT_ORDER_HOLD_POSITION then
@@ -757,16 +759,7 @@ function BuildingHelper:StartBuilding( builder )
 
     -- Put the builder invulnerable inside the building in construction
     if bBuilderInside then
-        ApplyModifier(builder, "modifier_builder_hidden")
-        builder.entrance_to_build = builder:GetAbsOrigin()
-        
-        local location_builder = Vector(location.x, location.y, location.z - 200)
-        building.builder_inside = builder
-        builder:AddNoDraw()
-
-        Timers:CreateTimer(function()
-            builder:SetAbsOrigin(location_builder)
-        end)
+        BuildingHelper:HideBuilder(builder, location, building)
     end
 
      -- Health Update Timer and Behaviors
@@ -825,10 +818,7 @@ function BuildingHelper:StartBuilding( builder )
                         if bConsumesBuilder then
                             builder:ForceKill(true)
                         else
-                        
-                            builder:RemoveModifierByName("modifier_builder_hidden")
-                            builder:SetAbsOrigin(builder.entrance_to_build)
-                            builder:RemoveNoDraw()
+                            BuildingHelper:ShowBuilder(builder)
                         end
 
                         -- Advance Queue
@@ -888,10 +878,7 @@ function BuildingHelper:StartBuilding( builder )
                         if bConsumesBuilder then
                             builder:ForceKill(true)
                         else
-                        
-                            builder:RemoveModifierByName("modifier_builder_hidden")
-                            builder:SetAbsOrigin(builder.entrance_to_build)
-                            builder:RemoveNoDraw()
+                            BuildingHelper:ShowBuilder(builder)
                         end
 
                         -- Advance Queue
@@ -1605,6 +1592,25 @@ end
 function BuildingHelper:GetBlockPathingSize(unit)
     local unitTable = (type(unit) == "table") and BuildingHelper.UnitKVs[unit:GetUnitName()] or BuildingHelper.UnitKVs[unit]
     return unitTable["BlockPathingSize"]
+end
+
+function BuildingHelper:HideBuilder(unit, location, building)
+    unit:AddNewModifier(unit, nil, "modifier_builder_hidden", {})
+    unit.entrance_to_build = unit:GetAbsOrigin()
+
+    local location_builder = Vector(location.x, location.y, location.z - 200)
+    building.builder_inside = unit
+    unit:AddNoDraw()
+
+    Timers:CreateTimer(function()
+        unit:SetAbsOrigin(location_builder)
+    end)
+end
+
+function BuildingHelper:ShowBuilder(unit)
+    unit:RemoveModifierByName("modifier_builder_hidden")
+    unit:SetAbsOrigin(unit.entrance_to_build)
+    unit:RemoveNoDraw()
 end
 
 -- Find the closest position of construction_size, within maxDistance
