@@ -3,8 +3,8 @@ function Build( event )
     local caster = event.caster
     local ability = event.ability
     local ability_name = ability:GetAbilityName()
-    local AbilityKV = BuildingHelper.AbilityKVs
-    local UnitKV = BuildingHelper.UnitKVs
+    local AbilityKV = BuildingHelper.AbilityKV
+    local UnitKV = BuildingHelper.UnitKV
 
     if caster:IsIdle() then
         caster:Interrupt()
@@ -63,7 +63,7 @@ function Build( event )
 
         -- Refund resources for this cancelled work
         if work.refund then
-            
+            hero:ModifyGold(gold_cost, false, 0)
         end
     end)
 
@@ -124,5 +124,22 @@ end
 
 -- Called when the Cancel ability-item is used
 function CancelBuilding( keys )
-    BuildingHelper:CancelBuilding(keys)
+    local building = keys.unit
+    local hero = building:GetOwner()
+    local playerID = hero:GetPlayerID()
+
+    BuildingHelper:print("CancelBuilding "..building:GetUnitName().." "..building:GetEntityIndex())
+
+    -- Refund here
+
+    -- Eject builder
+    local builder = building.builder_inside
+    if builder then   
+        builder:SetAbsOrigin(building:GetAbsOrigin())
+    end
+
+    building.state = "canceled"
+    Timers:CreateTimer(1/5, function() 
+        BuildingHelper:RemoveBuilding(building, true)
+    end)
 end

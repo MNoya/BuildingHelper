@@ -5,7 +5,7 @@ GRID_ALPHA = 30 -- Defines the transparency of the ghost squares (Panorama)
 MODEL_ALPHA = 100 -- Defines the transparency of both the ghost model (Panorama) and Building Placed (Lua)
 RECOLOR_GHOST_MODEL = true -- Whether to recolor the ghost model green/red or not
 RECOLOR_BUILDING_PLACED = true -- Whether to recolor the queue of buildings placed (Lua)
-
+INITIAL_HEALTH_FACTOR = 0.10 -- percentage health that buildings should start at
 BH_PRINT = true --Turn this off on production
 
 if not BuildingHelper then
@@ -17,23 +17,9 @@ end
     * Loads Key Values into the BuildingAbilities
 ]]--
 function BuildingHelper:Init()
-    debug.sethook(function(...)
-        local info = debug.getinfo(2)
-        local src = tostring(info.short_src)
-        local name = tostring(info.name)
-        if name ~= "__index" then
-            if string.find(src, "addon_game_mode") then
-                if GameRules:GetGameModeEntity() then
-                    BuildingHelper:Activate()
-                    debug.sethook(nil, "c")
-                end
-            end
-        end
-    end, "c")
-
-    BuildingHelper.AbilityKVs = LoadKeyValues("scripts/npc/npc_abilities_custom.txt")
-    BuildingHelper.ItemKVs = LoadKeyValues("scripts/npc/npc_items_custom.txt")
-    BuildingHelper.UnitKVs = LoadKeyValues("scripts/npc/npc_units_custom.txt")
+    BuildingHelper.AbilityKV = LoadKeyValues("scripts/npc/npc_abilities_custom.txt")
+    BuildingHelper.ItemKV = LoadKeyValues("scripts/npc/npc_items_custom.txt")
+    BuildingHelper.UnitKV = LoadKeyValues("scripts/npc/npc_units_custom.txt")
 
     BuildingHelper:print("BuildingHelper Init")
     BuildingHelper.Players = {} -- Holds a table for each player ID
@@ -65,9 +51,30 @@ function BuildingHelper:Init()
     LinkLuaModifier("modifier_builder_hidden", "libraries/modifiers/modifier_builder_hidden", LUA_MODIFIER_MOTION_NONE)
     
     BuildingHelper.KV = {} -- Merge KVs into a single table
-    BuildingHelper:ParseKV(BuildingHelper.AbilityKVs, BuildingHelper.KV)
-    BuildingHelper:ParseKV(BuildingHelper.ItemKVs, BuildingHelper.KV)
-    BuildingHelper:ParseKV(BuildingHelper.UnitKVs, BuildingHelper.KV)
+    BuildingHelper:ParseKV(BuildingHelper.AbilityKV, BuildingHelper.KV)
+    BuildingHelper:ParseKV(BuildingHelper.ItemKV, BuildingHelper.KV)
+    BuildingHelper:ParseKV(BuildingHelper.UnitKV, BuildingHelper.KV)
+
+    -- Hook to override the order filter
+    debug.sethook(function(...)
+        local info = debug.getinfo(2)
+        local src = tostring(info.short_src)
+        local name = tostring(info.name)
+        if name ~= "__index" then
+            if string.find(src, "addon_game_mode") then
+                if GameRules:GetGameModeEntity() then
+                    local mode = GameRules:GetGameModeEntity()
+                    mode:SetExecuteOrderFilter(Dynamic_Wrap(BuildingHelper, 'OrderFilter'), BuildingHelper)
+                    self.oldFilter = mode.SetExecuteOrderFilter
+                    mode.SetExecuteOrderFilter = function(mode, fun, context)
+                        BuildingHelper.nextFilter = fun
+                        BuildingHelper.nextContext = context
+                    end
+                    debug.sethook(nil, "c")
+                end
+            end
+        end
+    end, "c")
 end
 
 function BuildingHelper:ParseKV( t, result )
@@ -90,14 +97,41 @@ function BuildingHelper:ParseKV( t, result )
     end
 end
 
--- Initializes the order filter
-function BuildingHelper:Activate()
-    local mode = GameRules:GetGameModeEntity()
-    mode:SetExecuteOrderFilter(Dynamic_Wrap(BuildingHelper, 'OrderFilter'), BuildingHelper)
-    self.oldFilter = mode.SetExecuteOrderFilter
-    mode.SetExecuteOrderFilter = function(mode, fun, context)
-        BuildingHelper.nextFilter = fun
-        BuildingHelper.nextContext = context
+function BuildingHelper:OnGameRulesStateChange(keys)
+    local newState = GameRules:State_Get()
+    if newState == DOTA_GAMERULES_STATE_CUSTOM_GAME_SETUP then
+        -- The base terrain GridNav is obtained directly from the vmap
+        BuildingHelper:InitGNV()
+    end
+end
+
+function BuildingHelper:OnNPCSpawned(keys)
+    local npc = EntIndexToHScript(keys.entindex)
+    if IsBuilder(npc) then
+        BuildingHelper:InitializeBuilder(npc)
+    end
+end
+
+function BuildingHelper:OnEntityKilled(keys)
+    local killed = EntIndexToHScript(keys.entindex_killed)
+
+    if IsBuilder(killed) then
+        BuildingHelper:ClearQueue(killed)
+    elseif IsCustomBuilding(killed) then
+        -- Building Helper grid cleanup
+        BuildingHelper:RemoveBuilding(killed, true)
+    end
+end
+
+function BuildingHelper:OnTreeCut(keys)
+    local treePos = Vector(keys.tree_x,keys.tree_y,0)
+
+    -- Create a dummy for clients to be able to detect trees standing and block their grid
+    CreateUnitByName("tree_chopped", treePos, false, nil, nil, 0)
+
+    -- Allow construction
+    if not GridNav:IsBlocked(treePos) then
+        BuildingHelper:FreeGridSquares(2, treePos)
     end
 end
 
@@ -174,44 +208,6 @@ function BuildingHelper:InitGNV()
     BuildingHelper.squareY = squareY
 end
 
-function BuildingHelper:OnGameRulesStateChange(keys)
-    local newState = GameRules:State_Get()
-    if newState == DOTA_GAMERULES_STATE_CUSTOM_GAME_SETUP then
-        -- The base terrain GridNav is obtained directly from the vmap
-        BuildingHelper:InitGNV()
-    end
-end
-
-function BuildingHelper:OnNPCSpawned(keys)
-    local npc = EntIndexToHScript(keys.entindex)
-    if IsBuilder(npc) then
-        BuildingHelper:InitializeBuilder(npc)
-    end
-end
-
-function BuildingHelper:OnEntityKilled(keys)
-    local killed = EntIndexToHScript(keys.entindex_killed)
-
-    if IsBuilder(killed) then
-        BuildingHelper:ClearQueue(killed)
-    elseif IsCustomBuilding(killed) then
-        -- Building Helper grid cleanup
-        BuildingHelper:RemoveBuilding(killed, true)
-    end
-end
-
-function BuildingHelper:OnTreeCut(keys)
-    local treePos = Vector(keys.tree_x,keys.tree_y,0)
-
-    -- Create a dummy for clients to be able to detect trees standing and block their grid
-    CreateUnitByName("tree_chopped", treePos, false, nil, nil, 0)
-
-    -- Allow construction
-    if not GridNav:IsBlocked(treePos) then
-        BuildingHelper:FreeGridSquares(2, treePos)
-    end
-end
-
 function BuildingHelper:SendGNV( args )
     local playerID = args.PlayerID
     local player = PlayerResource:GetPlayer(playerID)
@@ -229,7 +225,7 @@ function BuildingHelper:BuildCommand( args )
     local y = args['Y']
     local z = args['Z']
     local location = Vector(x, y, z)
-    local queue = tobool(args['Queue'])
+    local queue = args['Queue'] == 1
     local builder = EntIndexToHScript(args['builder']) --activeBuilder
 
     -- Cancel current repair
@@ -355,7 +351,7 @@ function BuildingHelper:AddBuilding(keys)
 
     buildingTable:SetVal("AbilityHandle", ability)
 
-    -- Prepare the builder, if it hasn't already been done. Since this would need to be done for every builder in some games, might as well do it here.
+    -- Prepare the builder, if it hasn't already been done
     if not builder.buildingQueue then  
         BuildingHelper:InitializeBuilder(builder)
     end
@@ -373,7 +369,7 @@ function BuildingHelper:AddBuilding(keys)
     local fMaxScale = buildingTable:GetVal("MaxScale", "float")
     if not fMaxScale then
         -- If no MaxScale is defined, check the "ModelScale" KeyValue. Otherwise just default to 1
-        local fModelScale = BuildingHelper.UnitKVs[unitName].ModelScale
+        local fModelScale = BuildingHelper.UnitKV[unitName].ModelScale
         if fModelScale then
           fMaxScale = fModelScale
         else
@@ -496,11 +492,11 @@ function BuildingHelper:SetupBuildingTable( abilityName, builderHandle )
         -- Handle empty values
         local sVal = tostring(val)
         if sVal == "" then
-          return nil
+            return nil
         end
 
         if expectedType == "bool" then
-            return tobool(sVal)
+            return sVal == "1"
         elseif expectedType == "number" or expectedType == "float" then
             return tonumber(val)
         end
@@ -525,13 +521,13 @@ function BuildingHelper:SetupBuildingTable( abilityName, builderHandle )
     end
 
     -- OverrideBuildingGhost
-    local override_ghost = BuildingHelper.UnitKVs[unitName]["OverrideBuildingGhost"]
+    local override_ghost = BuildingHelper.UnitKV[unitName]["OverrideBuildingGhost"]
     if override_ghost then
         buildingTable:SetVal("OverrideBuildingGhost", override_ghost)
     end
 
     -- Ensure that the unit actually exists
-    local unitTable = BuildingHelper.UnitKVs[unitName]
+    local unitTable = BuildingHelper.UnitKV[unitName]
     if not unitTable then
         BuildingHelper:print('Error: Definition for Unit ' .. unitName .. ' could not be found in the KeyValue files.')
         return
@@ -564,7 +560,7 @@ function BuildingHelper:SetupBuildingTable( abilityName, builderHandle )
     local fMaxScale = buildingTable:GetVal("MaxScale", "float")
     if not fMaxScale then
         -- If no MaxScale is defined, check the Units "ModelScale" KeyValue. Otherwise just default to 1
-        local fModelScale = BuildingHelper.UnitKVs[unitName].ModelScale
+        local fModelScale = BuildingHelper.UnitKV[unitName].ModelScale
         if fModelScale then
             fMaxScale = fModelScale
         else
@@ -689,19 +685,6 @@ function BuildingHelper:StartBuilding( builder )
     local regen = building:GetBaseHealthRegen()
     building:SetBaseHealthRegen(0)
 
-    local buildTime = buildingTable:GetVal("BuildTime", "float")
-    if buildTime == nil then
-        buildTime = .1
-    end
-
-     -- Cheat Code: Instant placement (skips construction process)
-    if GameRules.WarpTen then
-        buildTime = .1
-    end
-
-    -- the gametime when the building should be completed.
-    local fTimeBuildingCompleted=GameRules:GetGameTime()+buildTime
-
     ------------------------------------------------------------------
     -- Build Behaviours
     --  RequiresRepair: If set to 1 it will place the building and not update its health nor send the OnConstructionCompleted callback until its fully healed
@@ -712,9 +695,6 @@ function BuildingHelper:StartBuilding( builder )
     local bConsumesBuilder = buildingTable:GetVal("ConsumesBuilder", "bool")
     -------------------------------------------------------------------
 
-    -- whether we should scale the building.
-    local bScale = buildingTable:GetVal("Scale", "bool")
-
     -- whether the building is controllable or not
     local bPlayerCanControl = buildingTable:GetVal("PlayerCanControl", "bool")
     if bPlayerCanControl then
@@ -722,39 +702,37 @@ function BuildingHelper:StartBuilding( builder )
         building:SetOwner(playersHero)
     end
 
-    -- the amount to scale to.
-    local fMaxScale = buildingTable:GetVal("MaxScale", "float")
-    if fMaxScale == nil then
-        fMaxScale = 1
+    -- Start construction
+    if callbacks.onConstructionStarted then
+        callbacks.onConstructionStarted(building)
     end
+
+    -- buildTime can be overriden in the construction start callback
+    local buildTime = building.overrideBuildTime or buildingTable:GetVal("BuildTime", "float") or .1
+    local fTimeBuildingCompleted = GameRules:GetGameTime()+buildTime -- the gametime when the building should be completed
 
     -- Dota server updates at 30 frames per second
     local fserverFrameRate = 1/30
 
     -- Max and Initial Health factor
-    local masonry_rank = Players:GetCurrentResearchRank(player:GetPlayerID(), "human_research_masonry1")
-    local fMaxHealth = building:GetMaxHealth() * (1 + 0.2 * masonry_rank) 
-    local nInitialHealth = 0.10 * ( fMaxHealth )
+    local fMaxHealth = building:GetMaxHealth()
+    local fInitialHealthFactor = INITIAL_HEALTH_FACTOR
+    local nInitialHealth = math.floor(fInitialHealthFactor * ( fMaxHealth ))
     local fUpdateHealthInterval = buildTime / math.floor(fMaxHealth-nInitialHealth) -- health to add every tick until build time is completed.
-    ---------------------------------------------------------------------
-
-    -- Update model size, starting with an initial size
-    local fInitialModelScale = 0.2
-
-    -- scale to add every frame, distributed by build time
-    local fScaleInterval = (fMaxScale-fInitialModelScale) / (buildTime / fserverFrameRate)
-
-    -- start the building at the initial model scale
-    local fCurrentScale = fInitialModelScale
-    local bScaling = false -- Keep tracking if we're currently model scaling.
-    
     building:SetHealth(nInitialHealth)
     building.bUpdatingHealth = true
 
+    local bScale = buildingTable:GetVal("Scale", "bool") -- whether we should scale the building.
+    local fInitialModelScale = 0.2 -- initial size
+    local fMaxScale = buildingTable:GetVal("MaxScale", "float") or 1 -- the amount to scale to
+    local fScaleInterval = (fMaxScale-fInitialModelScale) / (buildTime / fserverFrameRate) -- scale to add every frame, distributed by build time
+    local fCurrentScale = fInitialModelScale -- start the building at the initial model scale
+    local bScaling = false -- Keep tracking if we're currently model scaling.
+    
     -- Set initial scale
     if bScale then
         building:SetModelScale(fCurrentScale)
-        bScaling=true
+        bScaling = true
     end
 
     -- Put the builder invulnerable inside the building in construction
@@ -809,7 +787,7 @@ function BuildingHelper:StartBuilding( builder )
                         callbacks.onConstructionCompleted(building)
                     end
                     
-                    BuildingHelper:print("HP was off by:", fMaxHealth - fAddedHealth)
+                    BuildingHelper:print("HP was off by: ".. fMaxHealth - fAddedHealth)
 
                     -- Eject Builder
                     if bBuilderInside then
@@ -995,96 +973,8 @@ function BuildingHelper:StartBuilding( builder )
         return .2
     end)
 
-    if callbacks.onConstructionStarted then
-        callbacks.onConstructionStarted(building)
-    end
-
     -- Remove the model particle
     ParticleManager:DestroyParticle(work.particleIndex, true)
-end
-
---[[
-      CancelBuilding
-      * Cancels the building
-      * Refunds the cost by a factor
-]]
-function BuildingHelper:CancelBuilding(keys)
-    local building = keys.unit
-    local hero = building:GetOwner()
-    local playerID = hero:GetPlayerID()
-
-    BuildingHelper:print("CancelBuilding "..building:GetUnitName().." "..building:GetEntityIndex())
-
-    -- Refund
-    local refund_factor = 0.75
-    local gold_cost = math.floor(GetGoldCost(building) * refund_factor)
-    local lumber_cost = math.floor(GetLumberCost(building) * refund_factor)
-
-    Players:ModifyGold(playerID, gold_cost)
-    Players:ModifyLumber(playerID, lumber_cost)
-    PopupGoldGain(building, gold_cost)
-    PopupLumber(building, lumber_cost)
-
-    -- Eject builder
-    local builder = building.builder_inside
-    if builder then   
-        builder:SetAbsOrigin(building:GetAbsOrigin())
-    end
-
-    -- Cancel builders repairing
-    local builders = building.units_repairing
-    if builders then
-        -- Remove the modifiers on the building and the builders
-        building:RemoveModifierByName("modifier_repairing_building")
-        for _,v in pairs(builders) do
-            local builder = EntIndexToHScript(v)
-            if builder and IsValidEntity(builder) then
-                builder:RemoveModifierByName("modifier_builder_repairing")
-
-                builder.state = "idle"
-                BuildingHelper:AdvanceQueue(builder)
-
-                local ability = builder:FindAbilityByName("human_gather")
-                if ability then 
-                    ToggleOff(ability)
-                end
-            end
-        end
-    end
-
-    -- Refund items (In the item-queue system, units can be queued before the building is finished)
-    for i=0,5 do
-        local item = building:GetItemInSlot(i)
-        if item then
-            if item:GetAbilityName() == "item_building_cancel" then
-                item:RemoveSelf()
-            else
-                Timers:CreateTimer(i*1/30, function() 
-                    building:CastAbilityImmediately(item, playerID)
-                end)
-            end
-        end
-    end
-
-    -- Special for RequiresRepair
-    local units_repairing = building.units_repairing
-    if units_repairing then
-        for k,v in pairs(units_repairing) do
-            local builder = EntIndexToHScript(v)
-            if builder and IsValidEntity(builder) then
-                builder:RemoveModifierByName("modifier_on_order_cancel_repair")
-                builder:RemoveModifierByName("modifier_peasant_repairing")
-                local race = GetUnitRace(builder)
-                local repair_ability = builder:FindAbilityByName(race.."_gather")
-                ToggleOff(repair_ability)
-            end
-        end
-    end
-
-    building.state = "canceled"
-    Timers:CreateTimer(1/5, function() 
-        BuildingHelper:RemoveBuilding(building, true)
-    end)
 end
 
 --[[
@@ -1229,7 +1119,7 @@ function BuildingHelper:ValidPosition(size, location, unit, callbacks)
     -- Check for special requirement
     local playerTable = BuildingHelper:GetPlayerTable(unit:GetPlayerOwnerID())
     local buildingName = playerTable.activeBuilding
-    local buildingTable = buildingName and BuildingHelper.UnitKVs[buildingName]
+    local buildingTable = buildingName and BuildingHelper.UnitKV[buildingName]
     local requires = buildingTable and buildingTable["Requires"]
 
     if requires then
@@ -1585,12 +1475,12 @@ function BuildingHelper:GetPlayerTable( playerID )
 end
 
 function BuildingHelper:GetConstructionSize(unit)
-    local unitTable = (type(unit) == "table") and BuildingHelper.UnitKVs[unit:GetUnitName()] or BuildingHelper.UnitKVs[unit]
+    local unitTable = (type(unit) == "table") and BuildingHelper.UnitKV[unit:GetUnitName()] or BuildingHelper.UnitKV[unit]
     return unitTable["ConstructionSize"]
 end
 
 function BuildingHelper:GetBlockPathingSize(unit)
-    local unitTable = (type(unit) == "table") and BuildingHelper.UnitKVs[unit:GetUnitName()] or BuildingHelper.UnitKVs[unit]
+    local unitTable = (type(unit) == "table") and BuildingHelper.UnitKV[unit:GetUnitName()] or BuildingHelper.UnitKV[unit]
     return unitTable["BlockPathingSize"]
 end
 
@@ -1669,14 +1559,9 @@ function IsBuildingAbility( ability )
     end
 
     local ability_name = ability:GetAbilityName()
-    local ability_table = BuildingHelper.AbilityKVs[ability_name]
+    local ability_table = BuildingHelper.KV[ability_name]
     if ability_table and ability_table["Building"] then
         return true
-    else
-        ability_table = BuildingHelper.ItemKVs[ability_name]
-        if ability_table and ability_table["Building"] then
-            return true
-        end
     end
 
     return false
@@ -1685,7 +1570,7 @@ end
 -- Builders are stored in a nettable in addition to the builder label
 function IsBuilder( unit )
     local table = CustomNetTables:GetTableValue("builders", tostring(unit:GetEntityIndex()))
-    return table and tobool(table["IsBuilder"]) or false
+    return table and (table["IsBuilder"] == "1") or false
 end
 
 function IsCustomBuilding( unit )
