@@ -3,25 +3,42 @@
 GameUI.SetRenderBottomInsetOverride( 0 );
 
 var state = 'disabled';
+var frame_rate = 1/30;
 var size = 0;
 var overlay_size = 0;
-var grid_alpha = 30;
-var overlay_alpha = 90;
-var model_alpha = 100;
-var recolor_ghost = false;
+var range = 0;
 var pressedShift = false;
 var altDown = false;
 var requires;
 var modelParticle;
+var propParticle;
+var propScale;
+var offsetZ;
 var gridParticles;
 var overlayParticles;
+var rangeOverlay;
+var rangeOverlayActive;
 var builderIndex;
 var entityGrid;
 var distance_to_gold_mine;
 var cutTrees = [];
 var BLOCKED = 2;
 var GRID_TYPES = [];
+
+// building_settings.kv options
+var grid_alpha = CustomNetTables.GetTableValue( "building_settings", "grid_alpha").value
+var alt_grid_alpha = CustomNetTables.GetTableValue( "building_settings", "alt_grid_alpha").value
+var range_overlay_alpha = CustomNetTables.GetTableValue( "building_settings", "range_overlay_alpha").value
+var model_alpha = CustomNetTables.GetTableValue( "building_settings", "model_alpha").value
+var recolor_ghost = CustomNetTables.GetTableValue( "building_settings", "recolor_ghost").value;
+var turn_red = CustomNetTables.GetTableValue( "building_settings", "turn_red").value;
+
+var HEIGHT_RESTRICTION
+if (CustomNetTables.GetTableValue( "building_settings", "height_restriction") !== undefined)
+    HEIGHT_RESTRICTION = CustomNetTables.GetTableValue( "building_settings", "height_restriction").value;
+
 var Root = $.GetContextPanel()
+var localHeroIndex = Players.GetPlayerHeroEntityIndex( Players.GetLocalPlayer() );
 
 if (! Root.loaded)
 {
@@ -39,14 +56,14 @@ function StartBuildingHelper( params )
         // Set the parameters passed by AddBuilding
         state = params.state;
         size = params.size;
+        range = params.range;
         overlay_size = size*3;
-        grid_alpha = Number(params.grid_alpha);
-        model_alpha = Number(params.model_alpha);
-        recolor_ghost = Number(params.recolor_ghost);
         builderIndex = params.builderIndex;
         requires = params.requires;
         var scale = params.scale;
         var entindex = params.entindex;
+        var propScale = params.propScale;
+        offsetZ = params.offsetZ;
 
         if (requires !== undefined)
         {
@@ -63,10 +80,11 @@ function StartBuildingHelper( params )
 
         pressedShift = GameUI.IsShiftDown();
 
-        var localHeroIndex = Players.GetPlayerHeroEntityIndex( Players.GetLocalPlayer() );
-
         if (modelParticle !== undefined) {
             Particles.DestroyParticleEffect(modelParticle, true)
+        }
+        if (propParticle !== undefined) {
+            Particles.DestroyParticleEffect(propParticle, true)
         }
         if (gridParticles !== undefined) {
             for (var i in gridParticles) {
@@ -77,6 +95,9 @@ function StartBuildingHelper( params )
             for (var i in overlayParticles) {
                 Particles.DestroyParticleEffect(overlayParticles[i], true)
             }
+        }
+        if (rangeOverlay !== undefined) {
+            Particles.DestroyParticleEffect(rangeOverlay, true)
         }
 
         // Building Ghost
@@ -96,12 +117,23 @@ function StartBuildingHelper( params )
             gridParticles.push(particle)
         }
 
+        // Prop particle attachment
+        if (params.propIndex !== undefined)
+        {
+            propParticle = Particles.CreateParticle("particles/buildinghelper/ghost_model.vpcf", ParticleAttachment_t.PATTACH_ABSORIGIN, localHeroIndex);
+            Particles.SetParticleControlEnt(propParticle, 1, params.propIndex, ParticleAttachment_t.PATTACH_ABSORIGIN_FOLLOW, "attach_hitloc", Entities.GetAbsOrigin(params.propIndex), true)
+            Particles.SetParticleControl(propParticle, 2, ghost_color)
+            Particles.SetParticleControl(propParticle, 3, [model_alpha,0,0])
+            Particles.SetParticleControl(propParticle, 4, [propScale,0,0])
+        }
+            
+        rangeOverlayActive = false;
         overlayParticles = [];
     }
 
     if (state == 'active')
     {   
-        $.Schedule(1/60, StartBuildingHelper);
+        $.Schedule(frame_rate, StartBuildingHelper);
 
         // Get all the creature entities on the screen
         var entities = Entities.GetAllEntitiesByClassname('npc_dota_building')
@@ -153,7 +185,6 @@ function StartBuildingHelper( params )
 
         var mPos = GameUI.GetCursorPosition();
         var GamePos = Game.ScreenXYToWorld(mPos[0], mPos[1]);
-        GamePos[2]+=5 //Modify offset on ground based on the origin
         if ( GamePos !== null ) 
         {
             SnapToGrid(GamePos, size)
@@ -208,7 +239,7 @@ function StartBuildingHelper( params )
                     {
                         var particle = Particles.CreateParticle("particles/buildinghelper/square_overlay.vpcf", ParticleAttachment_t.PATTACH_CUSTOMORIGIN, 0)
                         Particles.SetParticleControl(particle, 1, [32,0,0])
-                        Particles.SetParticleControl(particle, 3, [0,0,0])
+                        Particles.SetParticleControl(particle, 3, [alt_grid_alpha,0,0])
                         overlayParticles.push(particle)
                     }
                 }
@@ -238,8 +269,7 @@ function StartBuildingHelper( params )
                         if (IsBlocked(pos2) || TooCloseToGoldmine(pos2))
                             color = [255,0,0]                        
 
-                        Particles.SetParticleControl(overlayParticle, 2, color)        
-                        Particles.SetParticleControl(overlayParticle, 3, [overlay_alpha,0,0])
+                        Particles.SetParticleControl(overlayParticle, 2, color)
                     }
                 }
             }
@@ -257,13 +287,37 @@ function StartBuildingHelper( params )
 
             // Update the model particle
             Particles.SetParticleControl(modelParticle, 0, GamePos)
+            if (propParticle !== undefined) Particles.SetParticleControl(propParticle, 0, [GamePos[0],GamePos[1],GamePos[2]+offsetZ])
+
+            // Destroy the range overlay if its not a valid building location
+            if (invalid)
+            {
+                if (rangeOverlayActive && rangeOverlay !== undefined)
+                {
+                    Particles.DestroyParticleEffect(rangeOverlay, true)
+                    rangeOverlayActive = false
+                }
+            }
+            else
+            {
+                if (!rangeOverlayActive)
+                {
+                    rangeOverlay = Particles.CreateParticle("particles/buildinghelper/range_overlay.vpcf", ParticleAttachment_t.PATTACH_CUSTOMORIGIN, localHeroIndex)
+                    Particles.SetParticleControl(rangeOverlay, 1, [range,0,0])
+                    Particles.SetParticleControl(rangeOverlay, 2, [255,255,255])
+                    Particles.SetParticleControl(rangeOverlay, 3, [range_overlay_alpha,0,0])
+                    rangeOverlayActive = true
+                }              
+            }
+
+            if (rangeOverlay !== undefined)
+                Particles.SetParticleControl(rangeOverlay, 0, GamePos)
 
             // Turn the model red if we can't build there
-            if (recolor_ghost){
-                if (invalid)
-                    Particles.SetParticleControl(modelParticle, 2, [255,0,0])
-                else
-                    Particles.SetParticleControl(modelParticle, 2, [255,255,255])
+            if (turn_red){
+                invalid ? Particles.SetParticleControl(modelParticle, 2, [255,0,0]) : Particles.SetParticleControl(modelParticle, 2, [255,255,255])
+                if (propParticle !== undefined)
+                    invalid ? Particles.SetParticleControl(propParticle, 2, [255,0,0]) : Particles.SetParticleControl(propParticle, 2, [255,255,255])
             }
         }
 
@@ -279,6 +333,12 @@ function EndBuildingHelper()
     state = 'disabled'
     if (modelParticle !== undefined){
          Particles.DestroyParticleEffect(modelParticle, true)
+    }
+    if (propParticle !== undefined){
+         Particles.DestroyParticleEffect(propParticle, true)
+    }
+    if (rangeOverlay !== undefined){
+        Particles.DestroyParticleEffect(rangeOverlay, true)
     }
     for (var i in gridParticles) {
         Particles.DestroyParticleEffect(gridParticles[i], true)
@@ -400,8 +460,10 @@ function IsBlocked(position) {
 
     if (requires !== undefined)
         return !IsSpecialGrid(x,y, requires)
-    
-    return (Root.GridNav[x][y] >= BLOCKED) || IsEntityGridBlocked(x,y)
+
+    var restrictHeight = (HEIGHT_RESTRICTION !== undefined) ? position[2] < HEIGHT_RESTRICTION : false
+
+    return restrictHeight || Root.GridNav[x][y] == BLOCKED || IsEntityGridBlocked(x,y)
 }
 
 function IsEntityGridBlocked(x,y) {
