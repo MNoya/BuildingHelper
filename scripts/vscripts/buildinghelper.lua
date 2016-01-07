@@ -13,6 +13,9 @@ function BuildingHelper:Init()
     BuildingHelper.ItemKV = LoadKeyValues("scripts/npc/npc_items_custom.txt")
     BuildingHelper.UnitKV = LoadKeyValues("scripts/npc/npc_units_custom.txt")
 
+    -- building_settings nettable from buildings.kv
+    BuildingHelper:LoadSettings()
+
     BuildingHelper:print("BuildingHelper Init")
     BuildingHelper.Players = {} -- Holds a table for each player ID
     BuildingHelper.Dummies = {} -- Holds up to one entity for each building name
@@ -77,10 +80,12 @@ function BuildingHelper:LoadSettings()
 
     CustomNetTables:SetTableValue("building_settings", "grid_alpha", { value = BuildingHelper.Settings["GRID_ALPHA"] })
     CustomNetTables:SetTableValue("building_settings", "alt_grid_alpha", { value = BuildingHelper.Settings["ALT_GRID_ALPHA"] })
+    CustomNetTables:SetTableValue("building_settings", "alt_grid_squares", { value = BuildingHelper.Settings["ALT_GRID_SQUARES"] })
     CustomNetTables:SetTableValue("building_settings", "range_overlay_alpha", { value = BuildingHelper.Settings["RANGE_OVERLAY_ALPHA"] })
     CustomNetTables:SetTableValue("building_settings", "model_alpha", { value = BuildingHelper.Settings["MODEL_ALPHA"] })
     CustomNetTables:SetTableValue("building_settings", "recolor_ghost", { value = tobool(BuildingHelper.Settings["RECOLOR_GHOST_MODEL"]) })
     CustomNetTables:SetTableValue("building_settings", "turn_red", { value = tobool(BuildingHelper.Settings["RED_MODEL_WHEN_INVALID"]) })
+    CustomNetTables:SetTableValue("building_settings", "permanent_alt_grid", { value = tobool(BuildingHelper.Settings["PERMANENT_ALT_GRID"]) })
     
     if BuildingHelper.Settings["HEIGHT_RESTRICTION"] ~= "" then
         CustomNetTables:SetTableValue("building_settings", "height_restriction", { value = BuildingHelper.Settings["HEIGHT_RESTRICTION"] })
@@ -1744,5 +1749,4 @@ function DrawGridSquare( x, y, color )
     end)
 end
 
-BuildingHelper:LoadSettings()
 if not BuildingHelper.KV then BuildingHelper:Init() end
