@@ -280,12 +280,15 @@ function BuildingHelper:OnPlayerSelectedEntities(event)
     -- This is for Building Helper to know which is the currently active builder
     local mainSelected = EntIndexToHScript(playerTable.SelectedEntities["0"])
     local player = BuildingHelper:GetPlayerTable(playerID)
-    if IsValidEntity(mainSelected) and IsBuilder(mainSelected) then
-        player.activeBuilder = mainSelected
-    else
-        if IsValidEntity(player.activeBuilder) then
-            -- Clear ghost particles when swapping to a non-builder
-            BuildingHelper:StopGhost(player.activeBuilder)
+
+    if IsValidEntity(mainSelected) then
+        if IsBuilder(mainSelected) then
+            player.activeBuilder = mainSelected
+        else
+            if IsValidEntity(player.activeBuilder) then
+                -- Clear ghost particles when swapping to a non-builder
+                BuildingHelper:StopGhost(player.activeBuilder)
+            end
         end
     end
 end
@@ -311,8 +314,13 @@ function BuildingHelper:OrderFilter(order)
     local abilityIndex = order.entindex_ability
     local unit = EntIndexToHScript(units["0"])
 
-    -- Cancel queue on Stop and Hold
-    if order_type == DOTA_UNIT_ORDER_STOP or order_type == DOTA_UNIT_ORDER_HOLD_POSITION then
+    -- Item is dropped
+    if order_type == DOTA_UNIT_ORDER_DROP_ITEM and IsBuilder(unit) then
+        BuildingHelper:ClearQueue(unit)
+        return true
+
+    -- Stop and Hold
+    elseif order_type == DOTA_UNIT_ORDER_STOP or order_type == DOTA_UNIT_ORDER_HOLD_POSITION then
         for n, unit_index in pairs(units) do 
             local unit = EntIndexToHScript(unit_index)
             if IsBuilder(unit) then
@@ -321,7 +329,7 @@ function BuildingHelper:OrderFilter(order)
         end
         return true
 
-    -- Cancel builder queue when casting non building abilities
+    -- Casting non building abilities
     elseif (abilityIndex and abilityIndex ~= 0) and unit and IsBuilder(unit) then
         local ability = EntIndexToHScript(abilityIndex)
         if not IsBuildingAbility(ability) then
@@ -476,10 +484,6 @@ function BuildingHelper:SetCallbacks(keys)
 
     function keys:OnConstructionCompleted( callback )
         callbacks.onConstructionCompleted = callback
-    end
-
-    function keys:EnableFireEffect( sFireEffect )
-        callbacks.fireEffect = sFireEffect
     end
 
     function keys:OnBelowHalfHealth( callback )
@@ -676,6 +680,10 @@ function BuildingHelper:RemoveBuilding( building, bForcedKill )
     if particleName then
         local particle = ParticleManager:CreateParticle(particleName, PATTACH_CUSTOMORIGIN, building)
         ParticleManager:SetParticleControl(particle, 0, building:GetAbsOrigin())
+    end
+
+    if building.fireEffectParticle then
+        ParticleManager:DestroyParticle(building.fireEffectParticle, false)
     end
 
     if building.prop then
@@ -1027,25 +1035,35 @@ function BuildingHelper:StartBuilding( builder )
     -- OnBelowHalfHealth timer
     building.onBelowHalfHealthProc = false
     building.healthChecker = Timers:CreateTimer(.2, function()
-        if IsValidEntity(building) then
-            if building:GetHealth() < fMaxHealth/2.0 and not building.onBelowHalfHealthProc and not building.bUpdatingHealth then
-                if callbacks.fireEffect then
-                    building:AddNewModifier(building, nil, callbacks.fireEffect, nil)
+        local fireEffect = BuildingHelper.KV[unitName]["FireEffect"]
+
+        if IsValidEntity(building) and building:IsAlive() then
+            local health_percentage = building:GetHealthPercent() * 0.01
+            local belowThreshold = health_percentage < BuildingHelper.Settings["FIRE_EFFECT_FACTOR"]
+            if belowThreshold and not building.onBelowHalfHealthProc and building.state == "complete" then
+                if fireEffect then
+                    -- Fire particle
+                    if BuildingHelper.KV[unitName]["AttachPoint"] then
+                        building.fireEffectParticle = ParticleManager:CreateParticle(fireEffect, PATTACH_CUSTOMORIGIN_FOLLOW, building)
+                        ParticleManager:SetParticleControlEnt(building.fireEffectParticle, 0, building, PATTACH_POINT_FOLLOW, BuildingHelper.KV[unitName]["AttachPoint"], building:GetAbsOrigin(), true)
+                    else
+                        building.fireEffectParticle = ParticleManager:CreateParticle(fireEffect, PATTACH_ABSORIGIN_FOLLOW, building)
+                    end
                 end
             
                 callbacks.onBelowHalfHealth(building)
                 building.onBelowHalfHealthProc = true
-            elseif building:GetHealth() >= fMaxHealth/2.0 and building.onBelowHalfHealthProc and not building.bUpdatingHealth then
-                if callbacks.fireEffect then
-                    building:RemoveModifierByName(callbacks.fireEffect)
+            elseif not belowThreshold and building.onBelowHalfHealthProc and building.state == "complete" then
+                if fireEffect then
+                    ParticleManager:DestroyParticle(building.fireEffectParticle, false)
                 end
+
                 callbacks.onAboveHalfHealth(building)
                 building.onBelowHalfHealthProc = false
             end
         else
             return nil
         end
-
         return .2
     end)
 
@@ -1420,13 +1438,13 @@ function BuildingHelper:AdvanceQueue(builder)
         builder.work = work
 
         -- Move towards the point at cast range
+        builder:MoveToPosition(location)
         builder.move_to_build_timer = Timers:CreateTimer(function()
             if not IsValidEntity(builder) or not builder:IsAlive() then return end
             builder.state = "moving_to_build"
 
             local distance = (location - builder:GetAbsOrigin()):Length2D()
             if distance > castRange then
-                builder:MoveToPosition(location)
                 return 0.03
             else
                 builder:Stop()
@@ -1721,13 +1739,7 @@ function IsBuilder( unit )
 end
 
 function IsCustomBuilding( unit )
-    local ability_building = unit:FindAbilityByName("ability_building")
-    local ability_tower = unit:FindAbilityByName("ability_tower")
-    if ability_building or ability_tower then
-        return true
-    else
-        return false
-    end
+    return unit:HasAbility("ability_building") or unit:HasAbility("ability_tower")
 end
 
 function PrintGridCoords( pos )
