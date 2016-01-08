@@ -248,14 +248,9 @@ function BuildingHelper:BuildCommand( args )
     local queue = args['Queue'] == 1
     local builder = EntIndexToHScript(args['builder']) --activeBuilder
 
-    -- Cancel current repair
-    if builder:HasModifier("modifier_builder_repairing") and not queue then
-        local race = GetUnitRace(builder)
-        local repair_ability = builder:FindAbilityByName(race.."_gather")
-        local event = {}
-        event.caster = builder
-        event.ability = repair_ability
-        BuilderStopRepairing(event)
+    -- Cancel current action
+    if not queue then
+        ExecuteOrderFromTable({ UnitIndex = args['builder'], OrderType = DOTA_UNIT_ORDER_STOP, Queue = false}) 
     end
 
     BuildingHelper:AddToQueue(builder, location, queue)
@@ -975,17 +970,10 @@ function BuildingHelper:StartBuilding( builder )
     else
 
         -- The building will have to be assisted through a repair ability
-        local race = GetUnitRace(builder)
-        local repair_ability_name = race.."_gather"
-        local repair_ability = builder:FindAbilityByName(repair_ability_name)
-        if not repair_ability then
-            BuildingHelper:print("Error, can't find "..repair_ability_name.." on the builder ", builder:GetUnitName(), builder:GetEntityIndex())
-            return
+        local repair_ability = BuildingHelper:GetRepairAbility( builder )
+        if repair_ability then
+            builder:CastAbilityOnTarget(building, repair_ability, playerID)
         end
-
-        --[[ExecuteOrderFromTable({ UnitIndex = builder:GetEntityIndex(), OrderType = DOTA_UNIT_ORDER_CAST_TARGET, 
-                        TargetIndex = building:GetEntityIndex(), AbilityIndex = repair_ability:GetEntityIndex(), Queue = false }) ]]
-        builder:CastAbilityOnTarget(building, repair_ability, playerID)
 
         building.updateHealthTimer = Timers:CreateTimer(function()
             if IsValidEntity(building) then
@@ -1612,6 +1600,24 @@ function BuildingHelper:GetOrCreateProp( propName )
         prop:AddEffects(EF_NODRAW)
         BuildingHelper.Dummies[propName] = prop
         return prop
+    end
+end
+
+-- Retrieves the handle of the ability marked as "RepairAbility" on the unit key values
+function BuildingHelper:GetRepairAbility( unit )
+    local unitName = unit:GetUnitName()
+    local abilityName = BuildingHelper.UnitKV[unitName]["RepairAbility"]
+    if not abilityName then
+        BuildingHelper:print("Error, no \"RepairAbility\" KV defined for "..unitName)
+        return
+    end
+
+    local ability = unit:FindAbilityByName(abilityName)
+    if not ability then
+        BuildingHelper:print("Error, can't find "..abilityName.." on the builder "..unitName)
+        return
+    else
+        return ability
     end
 end
 
