@@ -33,7 +33,7 @@ var range_overlay_alpha = CustomNetTables.GetTableValue( "building_settings", "r
 var model_alpha = CustomNetTables.GetTableValue( "building_settings", "model_alpha").value
 var recolor_ghost = CustomNetTables.GetTableValue( "building_settings", "recolor_ghost").value;
 var turn_red = CustomNetTables.GetTableValue( "building_settings", "turn_red").value;
-var permanent_alt_grid = CustomNetTables.GetTableValue( "building_settings", "turn_red").value;
+var permanent_alt_grid = CustomNetTables.GetTableValue( "building_settings", "permanent_alt_grid").value;
 
 var HEIGHT_RESTRICTION
 if (CustomNetTables.GetTableValue( "building_settings", "height_restriction") !== undefined)
