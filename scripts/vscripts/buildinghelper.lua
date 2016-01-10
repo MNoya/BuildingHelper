@@ -27,9 +27,9 @@ function BuildingHelper:Init()
 
     -- Grid States
     BuildingHelper.GridTypes = {}
-    BuildingHelper.GridTypes["BLOCKED"] = 1
-    BuildingHelper.GridTypes["BUILDABLE"] = 2
-    BuildingHelper.NextGridValue = 4
+    BuildingHelper.NextGridValue = 1
+    BuildingHelper:NewGridType("BLOCKED")
+    BuildingHelper:NewGridType("BUILDABLE")
 
     -- Panorama Event Listeners
     CustomGameEventManager:RegisterListener("building_helper_build_command", Dynamic_Wrap(BuildingHelper, "BuildCommand"))
@@ -126,7 +126,12 @@ function BuildingHelper:ParseKV( t, result )
 
                     -- Add required grid types
                     if info['Requires'] then
-                        values.requires = info['Requires']
+                        values.requires = string.upper(info['Requires'])
+                    end
+
+                    -- Add denied grid types
+                    if info['Prevents'] then
+                        values.requires = string.upper(info['Prevents'])
                     end
 
                     CustomNetTables:SetTableValue("construction_size", name, values)                   
@@ -306,6 +311,10 @@ function BuildingHelper:OnPlayerSelectedEntities(event)
     local playerTable = BuildingHelper:GetPlayerTable(playerID)
 
     playerTable.SelectedEntities = event.selected_entities
+    if not playerTable.SelectedEntities["0"] then
+        BuildingHelper:print("ERROR: OnPlayerSelectedEntities received an empty list")
+        return
+    end
 
     -- This is for Building Helper to know which is the currently active builder
     local mainSelected = EntIndexToHScript(playerTable.SelectedEntities["0"])
@@ -477,10 +486,6 @@ function BuildingHelper:AddBuilding(keys)
     -- Adjust the Model Orientation
     local yaw = buildingTable:GetVal("ModelRotation", "float")
     mgd:SetAngles(0, -yaw, 0)
-
-    -- Require a certain type of grid string
-    local requires = buildingTable:GetVal("Requires", "string")
-    event.requires = requires
                         
     CustomGameEventManager:Send_ServerToPlayer(player, "building_helper_enable", event)
 end
@@ -1186,14 +1191,20 @@ function BuildingHelper:FreeGridSquares(construction_size, location)
     BuildingHelper:AddGridType(construction_size, location, "BUILDABLE")
 end
 
+function BuildingHelper:NewGridType( grid_type )
+    grid_type = string.upper(grid_type)
+    BuildingHelper:print("Adding new Grid Type: ".. grid_type.." ["..BuildingHelper.NextGridValue.."]")
+    BuildingHelper.GridTypes[grid_type] = BuildingHelper.NextGridValue
+    BuildingHelper.NextGridValue = BuildingHelper.NextGridValue * 2
+    CustomNetTables:SetTableValue("building_settings", "grid_types", BuildingHelper.GridTypes)
+end
+
 -- Adds a grid_type to a square of size at centered at a location
 function BuildingHelper:AddGridType(size, location, grid_type)
     -- If it doesn't exist, add it
     grid_type = string.upper(grid_type)
     if not BuildingHelper.GridTypes[grid_type] then
-        BuildingHelper:print("Adding new Grid Type: ".. grid_type.." ["..BuildingHelper.NextGridValue.."]")
-        BuildingHelper.GridTypes[grid_type] = BuildingHelper.NextGridValue
-        BuildingHelper.NextGridValue = BuildingHelper.NextGridValue * 2
+        BuildingHelper:NewGridType( grid_type )
     end
 
     BuildingHelper:SetGridType(size, location, grid_type, "add")  
