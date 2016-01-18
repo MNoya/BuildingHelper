@@ -1,7 +1,5 @@
 "use strict"
 
-var attackTable = CustomNetTables.GetAllTableValues( "attacks_enabled" )
-
 function GetMouseTarget()
 {
     var mouseEntities = GameUI.FindScreenEntities( GameUI.GetCursorPosition() )
@@ -25,8 +23,6 @@ function GetMouseTarget()
 // Handle Right Button events
 function OnRightButtonPressed()
 {
-    $.Msg("OnRightButtonPressed")
-
     var iPlayerID = Players.GetLocalPlayer()
     var selectedEntities = Players.GetSelectedEntities( iPlayerID )
     var mainSelected = Players.GetLocalPlayerPortraitUnit() 
@@ -45,8 +41,6 @@ function OnRightButtonPressed()
 
 // Handle Left Button events
 function OnLeftButtonPressed() {
-    $.Msg("OnLeftButtonPressed")
-
     return false
 }
 
@@ -54,10 +48,6 @@ function IsBuilder(entIndex) {
     var tableValue = CustomNetTables.GetTableValue( "builders", entIndex.toString())
     return (tableValue !== undefined) && (tableValue.IsBuilder == 1)
 }
-
-(function () {
-    CustomNetTables.SubscribeNetTableListener( "attacks_enabled", OnAttacksEnabledChanged );
-})();
 
 // Main mouse event callback
 GameUI.SetMouseCallback( function( eventName, arg ) {
