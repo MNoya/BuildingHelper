@@ -398,7 +398,10 @@ function BuildingHelper:OrderFilter(order)
     local order_type = order.order_type
     local units = order.units
     local abilityIndex = order.entindex_ability
-    local unit = EntIndexToHScript(units["0"])
+    local unit = nil
+    if units["0"] then
+        unit = EntIndexToHScript(units["0"])
+    end
 
     -- Item is dropped
     if order_type == DOTA_UNIT_ORDER_DROP_ITEM and IsBuilder(unit) then
@@ -1875,7 +1878,7 @@ end
 
 function BuildingHelper:ShowBuilder(unit)
     unit:RemoveModifierByName("modifier_builder_hidden")
-    unit:SetAbsOrigin(unit.entrance_to_build)
+    FindClearSpaceForUnit(unit, unit.entrance_to_build, true)
     unit:RemoveNoDraw()
 end
 
@@ -1911,7 +1914,7 @@ function BuildingHelper:FindClosestEmptyPositionNearby( location, construction_s
 
     for x = lowerBoundX, upperBoundX do
         for y = lowerBoundY, upperBoundY do
-            if BuildingHelper.Grid[y][x] == GRID_FREE then
+            if BuildingHelper:CellHasGridType(x,y,"BUILDABLE") then
                 local pos = Vector(GridNav:GridPosToWorldCenterX(x), GridNav:GridPosToWorldCenterY(y), 0)
                 BuildingHelper:SnapToGrid(construction_size, pos)
                 if not BuildingHelper:IsAreaBlocked(construction_size, pos) then
