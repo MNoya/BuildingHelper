@@ -506,6 +506,9 @@ function BuildingHelper:AddBuilding(keys)
     playerTable.activeBuildingTable = buildingTable
     playerTable.activeCallbacks = callbacks
 
+    -- Offset Z on the model particle
+    event.modelOffset = BuildingHelper.UnitKV[unitName]["ModelOffset"] or 0
+
     -- npc_dota_creature doesn't render cosmetics on the particle ghost, use hero names instead
     local overrideGhost = buildingTable:GetVal("OverrideBuildingGhost", "string")
     if overrideGhost then
@@ -743,23 +746,21 @@ function BuildingHelper:PlaceBuilding(player, name, location, construction_size,
     -- Spawn point obstructions before placing the building
     local gridNavBlockers = BuildingHelper:BlockGridSquares(construction_size, pathing_size, location)
 
+    -- Adjust the model position z
+    local model_offset = BuildingHelper.UnitKV[name]["ModelOffset"] or 0
+    local model_location = Vector(location.x, location.y, location.z + model_offset)
+
     -- Spawn the building
-    local building = CreateUnitByName(name, location, false, playersHero, player, playersHero:GetTeamNumber())
+    local building = CreateUnitByName(name, model_location, false, playersHero, player, playersHero:GetTeamNumber())
     building:SetControllableByPlayer(playerID, true)
     building:SetOwner(playersHero)
     building.construction_size = construction_size
     building.blockers = gridNavBlockers
 
-    -- Create pedestal if required
+    -- Create pedestal
     local pedestal = BuildingHelper.UnitKV[name]["PedestalModel"]
     if pedestal then
-        local offset = BuildingHelper.UnitKV[name]["PedestalOffset"] or 0
-        local prop = SpawnEntityFromTableSynchronous("prop_dynamic", {model = pedestal})
-        local scale = BuildingHelper.UnitKV[name]["PedestalModelScale"] or building:GetModelScale()
-        local offset_location = Vector(location.x, location.y, location.z + offset)
-        prop:SetModelScale(scale)
-        prop:SetAbsOrigin(offset_location)
-        building.prop = prop -- Store the pedestal prop
+        local prop = BuildingHelper:CreatePedestalForBuilding(building, name, location, pedestal)
     end
 
     if angle then
@@ -857,6 +858,8 @@ function BuildingHelper:StartBuilding( builder )
     end
 
     -- Initialize the building
+    local model_offset = BuildingHelper.UnitKV[unitName]["ModelOffset"] or 0
+    location.z = location.z + model_offset
     building:SetAbsOrigin(location)
     building:SetControllableByPlayer(playerID, true)
     building.blockers = gridNavBlockers
@@ -1599,13 +1602,17 @@ function BuildingHelper:AddToQueue( builder, location, bQueued )
             unitName = overrideGhost
         end
 
+        -- Adjust the model position z
+        local model_offset = BuildingHelper.UnitKV[buildingName]["ModelOffset"] or 0
+        local model_location = Vector(location.x, location.y, location.z + model_offset)
+
         -- Create the building entity that will be used to start construction and project the queue particles
-        local entity = CreateUnitByName(unitName, location, false, nil, nil, builder:GetTeam())
+        local entity = CreateUnitByName(unitName, model_location, false, nil, nil, builder:GetTeam())
         entity:AddEffects(EF_NODRAW)
         entity:AddNewModifier(entity, nil, "modifier_out_of_world", {})
 
         local modelParticle = ParticleManager:CreateParticleForPlayer("particles/buildinghelper/ghost_model.vpcf", PATTACH_ABSORIGIN, entity, player)
-        ParticleManager:SetParticleControl(modelParticle, 0, location)
+        ParticleManager:SetParticleControl(modelParticle, 0, model_location)
         ParticleManager:SetParticleControlEnt(modelParticle, 1, entity, 1, "attach_hitloc", entity:GetAbsOrigin(), true) -- Model attach          
         ParticleManager:SetParticleControl(modelParticle, 3, Vector(BuildingHelper.Settings["MODEL_ALPHA"],0,0)) -- Alpha
         ParticleManager:SetParticleControl(modelParticle, 4, Vector(fMaxScale,0,0)) -- Scale
@@ -1615,14 +1622,11 @@ function BuildingHelper:AddToQueue( builder, location, bQueued )
 
         -- Create pedestal
         local pedestal = buildingTable:GetVal("PedestalModel")
-        local offset = buildingTable:GetVal("PedestalOffset", "float") or 0
         if pedestal then
-            local prop = SpawnEntityFromTableSynchronous("prop_dynamic", {model = pedestal})
+            local prop = BuildingHelper:CreatePedestalForBuilding(entity, buildingName, location, pedestal)
             local scale = buildingTable:GetVal("PedestalModelScale", "float") or entity:GetModelScale()
+            local offset = buildingTable:GetVal("PedestalOffset", "float") or 0
             local offset_location = Vector(location.x, location.y, location.z + offset)
-            prop:SetModelScale(scale)
-            prop:SetAbsOrigin(offset_location)
-            entity.prop = prop -- Store the pedestal prop
 
             prop:AddEffects(EF_NODRAW)
             prop.pedestalParticle = ParticleManager:CreateParticleForPlayer("particles/buildinghelper/ghost_model.vpcf", PATTACH_ABSORIGIN, prop, player)
@@ -1845,6 +1849,17 @@ function BuildingHelper:GetOrCreateProp( propName )
         BuildingHelper.Dummies[propName] = prop
         return prop
     end
+end
+
+function BuildingHelper:CreatePedestalForBuilding(entity, buildingName, location, pedestalName)
+    local offset = BuildingHelper.UnitKV[buildingName]["PedestalOffset"] or 0
+    local prop = SpawnEntityFromTableSynchronous("prop_dynamic", {model = pedestalName})
+    local scale = BuildingHelper.UnitKV[buildingName]["PedestalModelScale"] or entity:GetModelScale()
+    local offset_location = Vector(location.x, location.y, location.z + offset)
+    prop:SetModelScale(scale)
+    prop:SetAbsOrigin(offset_location)
+    entity.prop = prop -- Store the pedestal prop
+    return prop
 end
 
 -- Retrieves the handle of the ability marked as "RepairAbility" on the unit key values
