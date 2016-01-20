@@ -750,6 +750,18 @@ function BuildingHelper:PlaceBuilding(player, name, location, construction_size,
     building.construction_size = construction_size
     building.blockers = gridNavBlockers
 
+    -- Create pedestal if required
+    local pedestal = BuildingHelper.UnitKV[name]["PedestalModel"]
+    if pedestal then
+        local offset = BuildingHelper.UnitKV[name]["PedestalOffset"] or 0
+        local prop = SpawnEntityFromTableSynchronous("prop_dynamic", {model = pedestal})
+        local scale = BuildingHelper.UnitKV[name]["PedestalModelScale"] or building:GetModelScale()
+        local offset_location = Vector(location.x, location.y, location.z + offset)
+        prop:SetModelScale(scale)
+        prop:SetAbsOrigin(offset_location)
+        building.prop = prop -- Store the pedestal prop
+    end
+
     if angle then
         building:SetAngles(0,-angle,0)
     end
