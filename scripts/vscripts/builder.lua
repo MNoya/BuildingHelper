@@ -40,6 +40,11 @@ function Build( event )
 
     -- Additional checks to confirm a valid building position can be performed here
     event:OnPreConstruction(function(vPos)
+        if not BuildingHelper:MeetsHeightCondition(vPos) then
+            SendErrorMessage(playerID, "#error_invalid_build_position")
+            return false
+        end
+
         return true
     end)
 
