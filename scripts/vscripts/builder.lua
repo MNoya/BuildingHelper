@@ -4,15 +4,9 @@ function Build( event )
     local ability = event.ability
     local ability_name = ability:GetAbilityName()
     local building_name = ability:GetAbilityKeyValues()['UnitName']
-    local gold_cost = ability:GetGoldCost(1)
-    
-    local construction_size = BuildingHelper:GetConstructionSize(building_name)
-    local construction_radius = construction_size * 64 - 32
-
+    local gold_cost = ability:GetGoldCost(1) 
     local hero = caster:IsRealHero() and caster or caster:GetOwner()
     local playerID = hero:GetPlayerID()
-    local player = PlayerResource:GetPlayer(playerID)    
-    local teamNumber = hero:GetTeamNumber()
 
     -- If the ability has an AbilityGoldCost, it's impossible to not have enough gold the first time it's cast
     -- Always refund the gold here, as the building hasn't been placed yet
@@ -44,6 +38,8 @@ function Build( event )
         -- Spend resources
         hero:ModifyGold(-gold_cost, true, 0)
 
+        -- Play a sound
+        EmitSoundOnClient(playerID, "DOTA_Item.ObserverWard.Activate")
     end)
 
     -- The construction failed and was never confirmed due to the gridnav being blocked in the attempted area
@@ -86,7 +82,7 @@ function Build( event )
         unit:SetAttackCapability(DOTA_UNIT_CAP_NO_ATTACK)
 
         -- Give item to cancel
-        local item = CreateItem("item_building_cancel", playersHero, playersHero)
+        local item = CreateItem("item_building_cancel", hero, hero)
         unit:AddItem(item)
 
         -- FindClearSpace for the builder
@@ -106,7 +102,6 @@ function Build( event )
         -- Give the unit their original attack capability
         unit:SetAttackCapability(unit.original_attack)
 
-
     end)
 
     -- These callbacks will only fire when the state between below half health/above half health changes.
@@ -124,7 +119,7 @@ end
 function CancelBuilding( keys )
     local building = keys.unit
     local hero = building:GetOwner()
-    local playerID = hero:GetPlayerID()
+    local playerID = building:GetPlayerOwnerID()
 
     BuildingHelper:print("CancelBuilding "..building:GetUnitName().." "..building:GetEntityIndex())
 
@@ -132,8 +127,8 @@ function CancelBuilding( keys )
 
     -- Eject builder
     local builder = building.builder_inside
-    if builder then   
-        builder:SetAbsOrigin(building:GetAbsOrigin())
+    if builder then
+        BuildingHelper:ShowBuilder(builder)
     end
 
     building.state = "canceled"
