@@ -44,6 +44,11 @@ function BuildingHelper:Init()
     if BuildingHelper.Settings["UPDATE_TREES"] then
         ListenToGameEvent('tree_cut', Dynamic_Wrap(BuildingHelper, 'OnTreeCut'), self)
     end
+
+    -- Lua Modifiers
+    LinkLuaModifier("modifier_out_of_world", "libraries/modifiers/modifier_out_of_world", LUA_MODIFIER_MOTION_NONE)
+    LinkLuaModifier("modifier_builder_hidden", "libraries/modifiers/modifier_builder_hidden", LUA_MODIFIER_MOTION_NONE)
+    LinkLuaModifier("modifier_disable_turning", "libraries/modifiers/modifier_disable_turning", LUA_MODIFIER_MOTION_NONE)
     
     BuildingHelper.KV = {} -- Merge KVs into a single table
     BuildingHelper:ParseKV(BuildingHelper.AbilityKV, BuildingHelper.KV)
