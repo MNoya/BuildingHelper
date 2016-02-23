@@ -1,4 +1,4 @@
-BH_VERSION = "1.0.2"
+BH_VERSION = "1.0.3"
 
 if not BuildingHelper then
     BuildingHelper = class({})
@@ -314,9 +314,13 @@ end
 
 function BuildingHelper:SendGNV(args)
     local playerID = args.PlayerID
-    local player = PlayerResource:GetPlayer(playerID)
-    BuildingHelper:print("Sending GNV to player "..playerID)
-    CustomGameEventManager:Send_ServerToPlayer(player, "gnv_register", {gnv=BuildingHelper.Encoded, squareX = BuildingHelper.squareX, squareY = BuildingHelper.squareY, boundX = BuildingHelper.minBoundX, boundY = BuildingHelper.minBoundY })
+    if playerID then
+        local player = PlayerResource:GetPlayer(playerID)
+        if player then
+            BuildingHelper:print("Sending GNV to player "..playerID)
+            CustomGameEventManager:Send_ServerToPlayer(player, "gnv_register", {gnv=BuildingHelper.Encoded, squareX = BuildingHelper.squareX, squareY = BuildingHelper.squareY, boundX = BuildingHelper.minBoundX, boundY = BuildingHelper.minBoundY })
+        end
+    end
 end
 
 --[[
@@ -357,6 +361,11 @@ end
 
 function BuildingHelper:OnPlayerSelectedEntities(event)
     local playerID = event.PlayerID
+    if not playerID then
+        BuildingHelper:print("ERROR: OnPlayerSelectedEntities without a player")
+        return
+    end
+    
     local playerTable = BuildingHelper:GetPlayerTable(playerID)
 
     playerTable.SelectedEntities = event.selected_entities
@@ -788,6 +797,7 @@ function BuildingHelper:UpgradeBuilding(building, newName)
     newBuilding:SetOwner(hero)
     newBuilding:SetControllableByPlayer(playerID, true)
     newBuilding:SetNeverMoveToClearSpace(true)
+    newBuilding:SetAbsOrigin(position)
     
     -- Update visuals
     local angles = BuildingHelper.UnitKV[newName]["ModelRotation"] or -building:GetAngles().y
@@ -1297,7 +1307,6 @@ end
 
 function BuildingHelper:NewGridType(grid_type)
     grid_type = string.upper(grid_type)
-    BuildingHelper:print("Adding new Grid Type: ".. grid_type.." ["..BuildingHelper.NextGridValue.."]")
     BuildingHelper.GridTypes[grid_type] = BuildingHelper.NextGridValue
     BuildingHelper.NextGridValue = BuildingHelper.NextGridValue * 2
     CustomNetTables:SetTableValue("building_settings", "grid_types", BuildingHelper.GridTypes)

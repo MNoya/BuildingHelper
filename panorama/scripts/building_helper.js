@@ -77,7 +77,6 @@ function StartBuildingHelper( params )
         modelOffset = params.modelOffset;
 
         requires = GetRequiredGridType(entindex)
-        $.Msg(Entities.GetUnitName(entindex)," requires ", requires)
         distance_to_gold_mine = HasGoldMineDistanceRestriction(entindex)
         
         // If we chose to not recolor the ghost model, set it white
@@ -398,7 +397,6 @@ function SendBuildCommand( params )
     pressedShift = GameUI.IsShiftDown();
     var mainSelected = Players.GetLocalPlayerPortraitUnit(); 
 
-    $.Msg("Send Build command. Queue: "+pressedShift)
     var mPos = GameUI.GetCursorPosition();
     var GamePos = Game.ScreenXYToWorld(mPos[0], mPos[1]);
 
@@ -519,7 +517,7 @@ function SnapToGrid32(coord) {
 }
 
 function SnapHeight(x,y,z){
-    return [x, y, z - (z%128)]
+    return [x, y, z - ((z+1)%128)]
 }
 
 function IsBlocked(position) {
