@@ -941,7 +941,7 @@ function BuildingHelper:StartBuilding(builder)
 
     -- Disable turning
     if BuildingHelper.UnitKV[unitName]["DisableTurning"]==1 or BuildingHelper.Settings["DISABLE_BUILDING_TURNING"] then
-        building:AddNewModifier(building, "modifier_disable_turning")
+        building:AddNewModifier(building, nil, "modifier_disable_turning", {})
     end
 
     -- Prevent regen messing with the building spawn hp gain
