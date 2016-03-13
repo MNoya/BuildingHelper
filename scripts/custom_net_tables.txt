@@ -3,6 +3,7 @@
     custom_net_tables =
     [
         "builders",
+        "selection",
         "construction_size",
         "building_settings",
     ]
