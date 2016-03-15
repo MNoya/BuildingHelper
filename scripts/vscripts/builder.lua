@@ -20,12 +20,14 @@ function Build( event )
 
         -- Check for minimum height if defined
         if not BuildingHelper:MeetsHeightCondition(vPos) then
+            BuildingHelper:print("Failed placement of " .. name .." - Placement is below the min height required")
             SendErrorMessage(playerID, "#error_invalid_build_position")
             return false
         end
 
         -- If not enough resources to queue, stop
         if PlayerResource:GetGold(playerID) < gold_cost then
+            BuildingHelper:print("Failed placement of " .. name .." - Not enough gold!")
             SendErrorMessage(playerID, "#error_not_enough_gold")
             return false
         end
@@ -39,7 +41,7 @@ function Build( event )
         hero:ModifyGold(-gold_cost, true, 0)
 
         -- Play a sound
-        EmitSoundOnClient(playerID, "DOTA_Item.ObserverWard.Activate")
+        EmitSoundOnClient("DOTA_Item.ObserverWard.Activate", PlayerResource:GetPlayer(playerID))
     end)
 
     -- The construction failed and was never confirmed due to the gridnav being blocked in the attempted area
@@ -131,10 +133,7 @@ function CancelBuilding( keys )
         BuildingHelper:ShowBuilder(builder)
     end
 
-    building.state = "canceled"
-    Timers:CreateTimer(1/5, function() 
-        BuildingHelper:RemoveBuilding(building, true)
-    end)
+    building:ForceKill(true) --This will call RemoveBuilding
 end
 
 -- Requires notifications library from bmddota/barebones
