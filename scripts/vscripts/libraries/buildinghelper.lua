@@ -1,4 +1,4 @@
-BH_VERSION = "1.1.1"
+BH_VERSION = "1.1.2"
 
 require('libraries/timers')
 require('libraries/selection')
@@ -58,26 +58,46 @@ function BuildingHelper:Init()
     BuildingHelper:ParseKV(BuildingHelper.ItemKV, BuildingHelper.KV)
     BuildingHelper:ParseKV(BuildingHelper.UnitKV, BuildingHelper.KV)
 
-    -- Hook to override the order filter
-    debug.sethook(function(...)
-        local info = debug.getinfo(2)
-        local src = tostring(info.short_src)
-        local name = tostring(info.name)
-        if name ~= "__index" then
+    -- Hook Boilerplate
+    if not __ACTIVATE_HOOK then
+        __ACTIVATE_HOOK = {funcs={}}
+        setmetatable(__ACTIVATE_HOOK, {
+          __call = function(t, func)
+            table.insert(t.funcs, func)
+          end
+        })
+
+        debug.sethook(function(...)
+          local info = debug.getinfo(2)
+          local src = tostring(info.short_src)
+          local name = tostring(info.name)
+          if name ~= "__index" then
             if string.find(src, "addon_game_mode") then
-                if GameRules:GetGameModeEntity() then
-                    local mode = GameRules:GetGameModeEntity()
-                    mode:SetExecuteOrderFilter(Dynamic_Wrap(BuildingHelper, 'OrderFilter'), BuildingHelper)
-                    self.oldFilter = mode.SetExecuteOrderFilter
-                    mode.SetExecuteOrderFilter = function(mode, fun, context)
-                        BuildingHelper.nextFilter = fun
-                        BuildingHelper.nextContext = context
-                    end
-                    debug.sethook(nil, "c")
+              if GameRules:GetGameModeEntity() then
+                for _, func in ipairs(__ACTIVATE_HOOK.funcs) do
+                  local status, err = pcall(func)
+                  if not status then
+                    print("__ACTIVATE_HOOK callback error: " .. err)
+                  end
                 end
+
+                debug.sethook(nil, "c")
+              end
             end
+          end
+        end, "c")
+    end
+
+    -- Hook the order filter
+    __ACTIVATE_HOOK(function()
+        local mode = GameRules:GetGameModeEntity()
+        mode:SetExecuteOrderFilter(Dynamic_Wrap(BuildingHelper, 'OrderFilter'), BuildingHelper)
+        self.oldFilter = mode.SetExecuteOrderFilter
+        mode.SetExecuteOrderFilter = function(mode, fun, context)
+            BuildingHelper.nextFilter = fun
+            BuildingHelper.nextContext = context
         end
-    end, "c")
+    end)
 end
 
 function BuildingHelper:LoadSettings()
@@ -599,6 +619,11 @@ function BuildingHelper:SetupBuildingTable(abilityName, builderHandle)
     function buildingTable:GetVal(key, expectedType)
         local val = buildingTable[key]
 
+        -- Return value directly if no second parameter
+        if not expectedType then
+            return val
+        end
+
         -- Handle missing values.
         if val == nil then
             if expectedType == "bool" then
@@ -981,7 +1006,7 @@ function BuildingHelper:StartBuilding(builder)
 
     local bScale = buildingTable:GetVal("Scale", "bool") -- whether we should scale the building.
     local fInitialModelScale = 0.2 -- initial size
-    local fMaxScale = buildingTable:GetVal("MaxScale", "float") or 1 -- the amount to scale to
+    local fMaxScale = building.overrideMaxScale or buildingTable:GetVal("MaxScale", "float") or 1 -- the amount to scale to
     local fScaleInterval = (fMaxScale-fInitialModelScale) / (buildTime / fserverFrameRate) -- scale to add every frame, distributed by build time
     local fCurrentScale = fInitialModelScale -- start the building at the initial model scale
     local bScaling = false -- Keep tracking if we're currently model scaling.
