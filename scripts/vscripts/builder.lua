@@ -38,7 +38,7 @@ function Build( event )
     -- Position for a building was confirmed and valid
     event:OnBuildingPosChosen(function(vPos)
         -- Spend resources
-        hero:ModifyGold(-gold_cost, true, 0)
+        hero:ModifyGold(-gold_cost, false, 0)
 
         -- Play a sound
         EmitSoundOnClient("DOTA_Item.ObserverWard.Activate", PlayerResource:GetPlayer(playerID))
@@ -84,8 +84,11 @@ function Build( event )
         unit:SetAttackCapability(DOTA_UNIT_CAP_NO_ATTACK)
 
         -- Give item to cancel
-        local item = CreateItem("item_building_cancel", hero, hero)
-        unit:AddItem(item)
+        unit.item_building_cancel = CreateItem("item_building_cancel", hero, hero)
+        if unit.item_building_cancel then 
+            unit:AddItem(unit.item_building_cancel)
+            unit.gold_cost = gold_cost
+        end
 
         -- FindClearSpace for the builder
         FindClearSpaceForUnit(caster, caster:GetAbsOrigin(), true)
@@ -100,6 +103,11 @@ function Build( event )
         BuildingHelper:print("Completed construction of " .. unit:GetUnitName() .. " " .. unit:GetEntityIndex())
         
         -- Play construction complete sound
+        
+        -- Remove the item
+        if unit.item_building_cancel then
+            UTIL_Remove(unit.item_building_cancel)
+        end
 
         -- Give the unit their original attack capability
         unit:SetAttackCapability(unit.original_attack)
@@ -109,11 +117,11 @@ function Build( event )
     -- These callbacks will only fire when the state between below half health/above half health changes.
     -- i.e. it won't fire multiple times unnecessarily.
     event:OnBelowHalfHealth(function(unit)
-        BuildingHelper:print("" .. unit:GetUnitName() .. " is below half health.")
+        BuildingHelper:print(unit:GetUnitName() .. " is below half health.")
     end)
 
     event:OnAboveHalfHealth(function(unit)
-        BuildingHelper:print("" ..unit:GetUnitName().. " is above half health.")        
+        BuildingHelper:print(unit:GetUnitName().. " is above half health.")        
     end)
 end
 
@@ -126,6 +134,9 @@ function CancelBuilding( keys )
     BuildingHelper:print("CancelBuilding "..building:GetUnitName().." "..building:GetEntityIndex())
 
     -- Refund here
+    if building.gold_cost then
+        hero:ModifyGold(building.gold_cost, false, 0)
+    end
 
     -- Eject builder
     local builder = building.builder_inside
