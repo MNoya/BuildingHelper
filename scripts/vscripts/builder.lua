@@ -20,14 +20,14 @@ function Build( event )
 
         -- Check for minimum height if defined
         if not BuildingHelper:MeetsHeightCondition(vPos) then
-            BuildingHelper:print("Failed placement of " .. name .." - Placement is below the min height required")
+            BuildingHelper:print("Failed placement of " .. building_name .." - Placement is below the min height required")
             SendErrorMessage(playerID, "#error_invalid_build_position")
             return false
         end
 
         -- If not enough resources to queue, stop
         if PlayerResource:GetGold(playerID) < gold_cost then
-            BuildingHelper:print("Failed placement of " .. name .." - Not enough gold!")
+            BuildingHelper:print("Failed placement of " .. building_name .." - Not enough gold!")
             SendErrorMessage(playerID, "#error_not_enough_gold")
             return false
         end
@@ -47,15 +47,15 @@ function Build( event )
     -- The construction failed and was never confirmed due to the gridnav being blocked in the attempted area
     event:OnConstructionFailed(function()
         local playerTable = BuildingHelper:GetPlayerTable(playerID)
-        local name = playerTable.activeBuilding
+        local building_name = playerTable.activeBuilding
 
-        BuildingHelper:print("Failed placement of " .. name)
+        BuildingHelper:print("Failed placement of " .. building_name)
     end)
 
     -- Cancelled due to ClearQueue
     event:OnConstructionCancelled(function(work)
-        local name = work.name
-        BuildingHelper:print("Cancelled construction of " .. name)
+        local building_name = work.name
+        BuildingHelper:print("Cancelled construction of " .. building_name)
 
         -- Refund resources for this cancelled work
         if work.refund then
