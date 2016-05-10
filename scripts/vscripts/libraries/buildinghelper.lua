@@ -1,4 +1,4 @@
-BH_VERSION = "1.1.3"
+BH_VERSION = "1.1.4"
 
 require('libraries/timers')
 require('libraries/selection')
@@ -865,7 +865,7 @@ function BuildingHelper:RemoveBuilding(building, bSkipEffects)
         local particleName = BuildingHelper.UnitKV[building:GetUnitName()]["DestructionEffect"]
         if particleName then
             local particle = ParticleManager:CreateParticle(particleName, PATTACH_CUSTOMORIGIN, building)
-            ParticleManager:SetParticleControl(particle, 0, building:GetAbsOrigin())
+            ParticleManager:SetParticleControlEnt(particle, 0, building, PATTACH_POINT_FOLLOW, "attach_origin", building:GetAbsOrigin(), true)
         end
 
         if building.fireEffectParticle then
@@ -1282,17 +1282,9 @@ function BuildingHelper:BlockPSO(size, location)
     BuildingHelper:SnapToGrid(size, pos)
 
     local gridNavBlockers = {}
-    if size == 5 then
+    if size % 2 == 1 then
         for x = pos.x - (size-2) * 32, pos.x + (size-2) * 32, 64 do
             for y = pos.y - (size-2) * 32, pos.y + (size-2) * 32, 64 do
-                local blockerLocation = Vector(x, y, pos.z)
-                local ent = SpawnEntityFromTableSynchronous("point_simple_obstruction", {origin = blockerLocation})
-                table.insert(gridNavBlockers, ent)
-            end
-        end
-    elseif size == 3 then
-        for x = pos.x - (size / 2) * 32 , pos.x + (size / 2) * 32 , 64 do
-            for y = pos.y - (size / 2) * 32 , pos.y + (size / 2) * 32 , 64 do
                 local blockerLocation = Vector(x, y, pos.z)
                 local ent = SpawnEntityFromTableSynchronous("point_simple_obstruction", {origin = blockerLocation})
                 table.insert(gridNavBlockers, ent)
@@ -1304,8 +1296,8 @@ function BuildingHelper:BlockPSO(size, location)
             local ent = SpawnEntityFromTableSynchronous("point_simple_obstruction", {origin = pos})
             table.insert(gridNavBlockers, ent)
         else
-            for x = pos.x - len, pos.x + len, len do
-                for y = pos.y - len, pos.y + len, len do
+            for x = pos.x - len, pos.x + len, 128 do
+                for y = pos.y - len, pos.y + len, 128 do
                     local blockerLocation = Vector(x, y, pos.z)
                     local ent = SpawnEntityFromTableSynchronous("point_simple_obstruction", {origin = blockerLocation})
                     table.insert(gridNavBlockers, ent)
