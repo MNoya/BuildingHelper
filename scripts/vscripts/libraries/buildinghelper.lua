@@ -1529,18 +1529,50 @@ function BuildingHelper:ValidPosition(size, location, unit, callbacks)
     end
 
     -- Check enemy units blocking the area
-    local construction_radius = size * 64 - 32
+    local construction_radius = size * 64
     local target_type = DOTA_UNIT_TARGET_HERO + DOTA_UNIT_TARGET_BASIC
     local flags = DOTA_UNIT_TARGET_FLAG_MAGIC_IMMUNE_ENEMIES + DOTA_UNIT_TARGET_FLAG_FOW_VISIBLE + DOTA_UNIT_TARGET_FLAG_NO_INVIS
     local enemies = FindUnitsInRadius(unit:GetTeamNumber(), location, nil, construction_radius, DOTA_UNIT_TARGET_TEAM_ENEMY, target_type, flags, FIND_ANY_ORDER, false)
-    if #enemies > 0 then
-        if callbacks.onConstructionFailed then
-            callbacks.onConstructionFailed()
-            return false
-        end
+
+    for _,enemy in pairs(enemies) do
+        local origin = enemy:GetAbsOrigin()
+        if not IsCustomBuilding(enemy) and BuildingHelper:EnemyIsInsideBuildingArea(enemy:GetAbsOrigin(), location, size) then
+            if callbacks.onConstructionFailed then
+                callbacks.onConstructionFailed()
+                return false
+            end
+        end      
     end
 
     return true
+end
+
+function BuildingHelper:GetBounds(point, len)
+    local bounds = {}
+    local X1 = point.x + len
+    local X2 = point.x - len
+    local Y1 = point.y + len
+    local Y2 = point.y - len
+    bounds.Min = {x=math.min(X1, X2),y=math.min(Y1, Y2)}
+    bounds.Max = {x=math.max(X1, X2),y=math.max(Y1, Y2)}
+    return bounds
+end
+
+function BuildingHelper:EnemyIsInsideBuildingArea(enemy_location, building_location, size)
+    local bBounds = BuildingHelper:GetBounds(building_location, size * 32)
+    
+    -- Enemy covers 2x2 squares
+    BuildingHelper:SnapToGrid(2, enemy_location)
+    local eBounds = BuildingHelper:GetBounds(enemy_location, 64)
+
+    local function between(num, lower, upper)
+        return num < upper and num > lower
+    end
+
+    local betweenX = between(eBounds.Min.x, bBounds.Min.x, bBounds.Max.x) or between(eBounds.Max.x, bBounds.Min.x, bBounds.Max.x)
+    local betweenY = between(eBounds.Min.y, bBounds.Min.y, bBounds.Max.y) or between(eBounds.Max.y, bBounds.Min.y, bBounds.Max.y)
+
+    return betweenX and betweenY
 end
 
 -- If not all squares are buildable, the area is blocked
