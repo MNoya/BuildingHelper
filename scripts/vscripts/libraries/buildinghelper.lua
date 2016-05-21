@@ -1,4 +1,4 @@
-BH_VERSION = "1.1.4"
+BH_VERSION = "1.1.5"
 
 require('libraries/timers')
 require('libraries/selection')
@@ -794,6 +794,8 @@ function BuildingHelper:PlaceBuilding(player, name, location, construction_size,
 
     building.state = "complete"
 
+    BuildingHelper:AddBuildingToPlayerTable(playerID, building)
+
     -- Return the created building
     return building
 end
@@ -858,7 +860,8 @@ end
     * Removes a building, removing it from the gridnav, with an optional parameter to skip particle effects
 ]]--
 function BuildingHelper:RemoveBuilding(building, bSkipEffects)
-    BuildingHelper:print("Removing Building: "..building:GetUnitName())
+    local buildingName = building:GetUnitName()
+    BuildingHelper:print("Removing Building: "..buildingName)
 
     -- Don't show the destruction effects when specified or killed to due UpgradeBuilding
     if not bSkipEffects and building.upgraded ~= true then
@@ -879,10 +882,14 @@ function BuildingHelper:RemoveBuilding(building, bSkipEffects)
 
     BuildingHelper:FreeGridSquares(BuildingHelper:GetConstructionSize(building), building:GetAbsOrigin())
 
-    if not building.blockers then 
-        return 
-    end
+    -- Remove handle and decrement count tracking
+    local playerID = building:GetPlayerOwnerID()
+    local buidingList = BuildingHelper:GetBuildings(playerID)
+    local index = getIndexTable(buidingList, building)
+    if index then table.remove(buidingList, index) end
+    BuildingHelper:SetBuildingCount(playerID, buildingName, BuildingHelper:GetBuildingCount(playerID, buildingName)-1)
 
+    if not building.blockers then return end
     for k, v in pairs(building.blockers) do
         UTIL_Remove(v)
     end
@@ -1066,6 +1073,7 @@ function BuildingHelper:StartBuilding(builder)
                         building.state = "complete"
                         building.builder = builder
                         callbacks.onConstructionCompleted(building)
+                        BuildingHelper:AddBuildingToPlayerTable(playerID, building)
                     end
                     
                     BuildingHelper:print("HP was off by: ".. fMaxHealth - fAddedHealth)
@@ -1128,6 +1136,7 @@ function BuildingHelper:StartBuilding(builder)
                         building.state = "complete"
                         building.builder = builder
                         callbacks.onConstructionCompleted(building)
+                        BuildingHelper:AddBuildingToPlayerTable(playerID, building)
                     end
 
                     -- Eject Builder
@@ -1992,11 +2001,42 @@ function BuildingHelper:GetRepairAbility(unit)
     end
 end
 
+-- Retrieves a list of all the buildings built by a player
+function BuildingHelper:GetBuildings(playerID)
+    local playerTable = BuildingHelper:GetPlayerTable(playerID)
+    playerTable.BuildingHandles = playerTable.BuildingHandles or {}
+    return playerTable.BuildingHandles
+end
+
+-- Returns number of buildings by name of a player
+function BuildingHelper:GetBuildingCount(playerID, buildingName)
+    local playerTable = BuildingHelper:GetPlayerTable(playerID)
+    playerTable.BuildingCount = playerTable.BuildingCount or {}
+    playerTable.BuildingCount[buildingName] = playerTable.BuildingCount[buildingName] or 0
+    return playerTable.BuildingCount[buildingName]
+end
+
+-- Sets the number of buildings by name of a player
+function BuildingHelper:SetBuildingCount(playerID, buildingName, number)
+    local playerTable = BuildingHelper:GetPlayerTable(playerID)
+    playerTable.BuildingCount = playerTable.BuildingCount or {}
+    playerTable.BuildingCount[buildingName] = number
+end
+
+-- Store handle and increment count tracking
+function BuildingHelper:AddBuildingToPlayerTable(playerID, building)
+    local buildingName = building:GetUnitName()
+    table.insert(BuildingHelper:GetBuildings(playerID), building)
+    BuildingHelper:SetBuildingCount(playerID, buildingName, BuildingHelper:GetBuildingCount(playerID, buildingName)+1)
+end
+
+-- Returns "ConstructionSize" value of a unit handle or unit name
 function BuildingHelper:GetConstructionSize(unit)
     local unitTable = (type(unit) == "table") and BuildingHelper.UnitKV[unit:GetUnitName()] or BuildingHelper.UnitKV[unit]
     return unitTable["ConstructionSize"]
 end
 
+-- Returns "BlockPathingSize" kv of a unit handle or unit name
 function BuildingHelper:GetBlockPathingSize(unit)
     local unitTable = (type(unit) == "table") and BuildingHelper.UnitKV[unit:GetUnitName()] or BuildingHelper.UnitKV[unit]
     return unitTable["BlockPathingSize"]
@@ -2143,15 +2183,18 @@ function tobool(s)
 end
 
 function split(inputstr, sep)
-    if sep == nil then
-            sep = "%s"
-    end
+    if sep == nil then sep = "%s" end
     local t={} ; i=1
     for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
-            t[i] = str
-            i = i + 1
+        t[i] = str
+        i = i + 1
     end
     return t
+end
+
+function getIndexTable(list, element)
+    if list == nil then return false end
+    for k,v in pairs(list) do if v == element then return k end end
 end
 
 function DrawGridSquare(x, y, color)
