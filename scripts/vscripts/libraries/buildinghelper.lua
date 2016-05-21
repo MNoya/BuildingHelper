@@ -762,8 +762,11 @@ end
     * Make sure the position is valid before calling this in code.
 ]]--
 function BuildingHelper:PlaceBuilding(player, name, location, construction_size, pathing_size, angle)
+    construction_size = construction_size or BuildingHelper:GetConstructionSize(newName)
+    pathing_size = pathing_size or BuildingHelper:GetBlockPathingSize(newName)
     BuildingHelper:SnapToGrid(construction_size, location)
-    local playerID = player:GetPlayerID()
+    local playerID = type(player)=="number" and player or player:GetPlayerID() --accept pass player ID or player Handle
+    local player = PlayerResource:GetPlayer(playerID)
     local playersHero = PlayerResource:GetSelectedHeroEntity(playerID)
     BuildingHelper:print("PlaceBuilding for playerID ".. playerID)
 
@@ -779,17 +782,32 @@ function BuildingHelper:PlaceBuilding(player, name, location, construction_size,
     building:SetControllableByPlayer(playerID, true)
     building:SetNeverMoveToClearSpace(true)
     building:SetOwner(playersHero)
+    building:SetAbsOrigin(model_location)
     building.construction_size = construction_size
     building.blockers = gridNavBlockers
+
+    -- Disable turning. If DisableTurning unit KV setting is not defined, use the global setting
+    local disableTurning = BuildingHelper.UnitKV[name]["DisableTurning"]
+    if not disableTurning then
+        if BuildingHelper.Settings["DISABLE_BUILDING_TURNING"] then
+            building:AddNewModifier(building, nil, "modifier_disable_turning", {})
+        end
+    elseif disableTurning == 1 then
+        building:AddNewModifier(building, nil, "modifier_disable_turning", {})
+    end
 
     -- Create pedestal
     local pedestal = BuildingHelper.UnitKV[name]["PedestalModel"]
     if pedestal then
-        local prop = BuildingHelper:CreatePedestalForBuilding(building, name, location, pedestal)
+        BuildingHelper:CreatePedestalForBuilding(building, name, GetGroundPosition(location, nil), pedestal)
     end
 
     if angle then
         building:SetAngles(0,-angle,0)
+    end
+
+    if not building:HasAbility("ability_building") then
+        building:AddAbility("ability_building")
     end
 
     building.state = "complete"
@@ -808,51 +826,19 @@ function BuildingHelper:UpgradeBuilding(building, newName)
     local oldBuildingName = building:GetUnitName()
     BuildingHelper:print("Upgrading Building: "..oldBuildingName.." -> "..newName)
     local playerID = building:GetPlayerOwnerID()
-    local hero = PlayerResource:GetSelectedHeroEntity(playerID)
     local position = building:GetAbsOrigin()
-    local model_offset = BuildingHelper.UnitKV[newName]["ModelOffset"] or 0
+    local angle = BuildingHelper.UnitKV[newName]["ModelRotation"] or -building:GetAngles().y
+    
     local old_offset = BuildingHelper.UnitKV[oldBuildingName]["ModelOffset"] or 0
-    position.z = position.z + model_offset - old_offset
-    
-    local newBuilding = CreateUnitByName(newName, position, false, nil, nil, building:GetTeamNumber()) 
-    newBuilding:SetOwner(hero)
-    newBuilding:SetControllableByPlayer(playerID, true)
-    newBuilding:SetNeverMoveToClearSpace(true)
-    newBuilding:SetAbsOrigin(position)
-    
-    -- Update visuals
-    local angles = BuildingHelper.UnitKV[newName]["ModelRotation"] or -building:GetAngles().y
-    newBuilding:SetAngles(0, -angles, 0)
-
-    -- Disable turning. If DisableTurning unit KV setting is not defined, use the global setting
-    local disableTurning = BuildingHelper.UnitKV[newName]["DisableTurning"]
-    if not disableTurning then
-        if BuildingHelper.Settings["DISABLE_BUILDING_TURNING"] then
-            newBuilding:AddNewModifier(newBuilding, nil, "modifier_disable_turning", {})
-        end
-    elseif disableTurning == 1 then
-        newBuilding:AddNewModifier(newBuilding, nil, "modifier_disable_turning", {})
-    end
-    
-    local pedestalName = BuildingHelper.UnitKV[newName]["PedestalModel"]
-    if pedestalName then
-        BuildingHelper:CreatePedestalForBuilding(newBuilding, newName, GetGroundPosition(position, nil), pedestalName)
-    end    
+    position.z = position.z - old_offset
 
     -- Kill the old building
     building:AddEffects(EF_NODRAW) --Hide it, so that it's still accessible after this script
     building.upgraded = true --Skips visual effects
     building:ForceKill(true) --This will call RemoveBuilding
-
-    -- Block the grid
-    newBuilding.construction_size = BuildingHelper:GetConstructionSize(newName)
-    newBuilding.blockers = BuildingHelper:BlockGridSquares(newBuilding.construction_size, BuildingHelper:GetBlockPathingSize(newName), position)
-
-    if not newBuilding:HasAbility("ability_building") then
-        newBuilding:AddAbility("ability_building")
-    end
-
-    return newBuilding
+    
+    -- Create the new building
+    return BuildingHelper:PlaceBuilding(playerID, newName, position, BuildingHelper:GetConstructionSize(newName), BuildingHelper:GetBlockPathingSize(newName), angle)  
 end
 
 --[[
@@ -1193,6 +1179,8 @@ function BuildingHelper:StartBuilding(builder)
                     BuildingHelper:AdvanceQueue(builder)
 
                     building.state = "complete"
+
+                    BuildingHelper:AddBuildingToPlayerTable(playerID, building)
                     return
                 else
                     return 0.1
