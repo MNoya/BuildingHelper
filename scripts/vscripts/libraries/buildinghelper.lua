@@ -945,6 +945,7 @@ function BuildingHelper:StartBuilding(builder)
     building.construction_size = construction_size
     building.buildingTable = buildingTable
     building.state = "building"
+    function building:IsUnderConstruction() return true end
 
     -- Adjust the Model Orientation
     local yaw = buildingTable:GetVal("ModelRotation", "float")
@@ -2016,6 +2017,7 @@ function BuildingHelper:AddBuildingToPlayerTable(playerID, building)
     local buildingName = building:GetUnitName()
     table.insert(BuildingHelper:GetBuildings(playerID), building)
     BuildingHelper:SetBuildingCount(playerID, buildingName, BuildingHelper:GetBuildingCount(playerID, buildingName)+1)
+    function building:IsUnderConstruction() return false end
 end
 
 -- Returns "ConstructionSize" value of a unit handle or unit name
