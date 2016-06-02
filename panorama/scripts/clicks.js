@@ -1,4 +1,5 @@
 "use strict"
+var right_click_repair = CustomNetTables.GetTableValue("building_settings", "right_click_repair").value;
 
 function GetMouseTarget()
 {
@@ -34,6 +35,12 @@ function OnRightButtonPressed()
     {
         // Cancel BH
         if (!pressedShift) SendCancelCommand()
+
+        // Repair rightclick
+        if (right_click_repair && IsCustomBuilding(targetIndex) && Entities.GetHealthPercent(targetIndex) < 100 && IsAlliedUnit(targetIndex, mainSelected)) {
+            GameEvents.SendCustomGameEventToServer( "building_helper_repair_command", {targetIndex: targetIndex, queue: pressedShift})
+            return true
+        }
     }
 
     return false
@@ -44,9 +51,17 @@ function OnLeftButtonPressed() {
     return false
 }
 
+function IsCustomBuilding(entIndex) {
+    return (Entities.GetAbilityByName( entIndex, "ability_building") != -1)
+}
+
 function IsBuilder(entIndex) {
     var tableValue = CustomNetTables.GetTableValue( "builders", entIndex.toString())
     return (tableValue !== undefined) && (tableValue.IsBuilder == 1)
+}
+
+function IsAlliedUnit(entIndex, targetIndex) {
+    return (Entities.GetTeamNumber(entIndex) == Entities.GetTeamNumber(targetIndex))
 }
 
 // Main mouse event callback
