@@ -1,4 +1,4 @@
-BH_VERSION = "1.2.0"
+BH_VERSION = "1.2.2"
 
 --[[
     For installation, usage and implementation examples check the wiki:
@@ -352,6 +352,21 @@ function BuildingHelper:SendGNV(args)
     end
 end
 
+-- Used to find the closest builder to a building location
+local GetClosestToPosition = function(unitList, position)
+    local t = {}
+    local distance = math.huge
+    local closest
+    for _,unit in pairs(unitList) do
+        local thisDistance = (unit:GetAbsOrigin()-position):Length2D()
+        if thisDistance < distance then
+            closest = unit
+            distance = thisDistance
+        end
+    end
+    return closest
+end
+
 --[[
     BuildCommand
     * Detects a Left Click with a builder through Panorama
@@ -364,10 +379,32 @@ function BuildingHelper:BuildCommand(args)
     local location = Vector(x, y, z)
     local queue = args['Queue'] == 1
     local builder = EntIndexToHScript(args['builder']) --activeBuilder
+    local name = builder:GetUnitName()
+    local builders = {}
+    local idle_builders = {}
+    local entityList = PlayerResource:GetSelectedEntities(playerID)
+
+    -- Filter all the selected builders
+    for k,entIndex in pairs(entityList) do
+        local unit = EntIndexToHScript(entIndex)
+        if unit:GetUnitName() == name then
+            if unit:IsIdle() then
+                table.insert(idle_builders, unit)
+            end
+            table.insert(builders, unit)
+        end
+    end
+
+    -- First select from idle builders
+    if #idle_builders > 0 then
+        builder = GetClosestToPosition(idle_builders, location)
+    else
+        builder = GetClosestToPosition(builders, location)
+    end
 
     -- Cancel current action
     if not queue then
-        ExecuteOrderFromTable({ UnitIndex = args['builder'], OrderType = DOTA_UNIT_ORDER_STOP, Queue = false}) 
+        ExecuteOrderFromTable({UnitIndex = builder:GetEntityIndex(), OrderType = DOTA_UNIT_ORDER_STOP, Queue = false}) 
     end
 
     BuildingHelper:AddToQueue(builder, location, queue)
@@ -378,14 +415,17 @@ end
     * Detects a Right Click/Tab with a builder through Panorama
 ]]--
 function BuildingHelper:CancelCommand(args)
-    local playerID = args['PlayerID']
+    local playerID = args.PlayerID
     local playerTable = BuildingHelper:GetPlayerTable(playerID)
     playerTable.activeBuilding = nil
 
-    if not playerTable.activeBuilder or not IsValidEntity(playerTable.activeBuilder) then
-        return
+    local selectedEntities = PlayerResource:GetSelectedEntities(playerID)
+    for _,entityIndex in pairs(selectedEntities) do
+        local unit = EntIndexToHScript(entityIndex)
+        if IsBuilder(unit) then
+            BuildingHelper:ClearQueue(unit)
+        end
     end
-    BuildingHelper:ClearQueue(playerTable.activeBuilder)
 end
 
 function BuildingHelper:RepairCommand(args)
@@ -508,6 +548,7 @@ function BuildingHelper:OrderFilter(order)
             end
         end
     end
+
 
     return ret
 end    
@@ -868,7 +909,6 @@ function BuildingHelper:PlaceBuilding(player, name, location, construction_size,
         building:AddAbility("ability_building")
     end
 
-    building.state = "complete"
     BuildingHelper:AddBuildingToPlayerTable(playerID, building)
 
     -- Return the created building
@@ -884,9 +924,9 @@ function BuildingHelper:UpgradeBuilding(building, newName)
     BuildingHelper:print("Upgrading Building: "..oldBuildingName.." -> "..newName)
     local playerID = building:GetPlayerOwnerID()
     local position = building:GetAbsOrigin()
-    local angle = GetUntiKV(newName, "ModelRotation") or -building:GetAngles().y
+    local angle = GetUnitKV(newName, "ModelRotation") or -building:GetAngles().y
     
-    local old_offset = GetUntiKV(oldBuildingName, "ModelOffset") or 0
+    local old_offset = GetUnitKV(oldBuildingName, "ModelOffset") or 0
     position.z = position.z - old_offset
 
     -- Kill the old building
@@ -904,6 +944,7 @@ function BuildingHelper:UpgradeBuilding(building, newName)
         end
     end
     new_building.units_repairing = building.units_repairing
+    building.upgraded_to = new_building
 
     return new_building
 end
@@ -939,8 +980,17 @@ function BuildingHelper:RemoveBuilding(building, bSkipEffects)
     local playerID = building:GetPlayerOwnerID()
     local buidingList = BuildingHelper:GetBuildings(playerID)
     local index = getIndexTable(buidingList, building)
-    if index then table.remove(buidingList, index) end
-    BuildingHelper:SetBuildingCount(playerID, buildingName, BuildingHelper:GetBuildingCount(playerID, buildingName)-1)
+    if index then
+        table.remove(buidingList, index)
+        BuildingHelper:SetBuildingCount(playerID, buildingName, BuildingHelper:GetBuildingCount(playerID, buildingName)-1)
+    else
+        buildingList = BuildingHelper:GetBuildingsUnderConstruction(playerID)
+        index = getIndexTable(buildingList, building)
+        if index then
+            table.remove(buildingList, index)
+            BuildingHelper:SetBuildingCount(playerID, buildingName, BuildingHelper:GetBuildingCount(playerID, buildingName)-1)
+        end
+    end
 
     if not building.blockers then return end
     for k, v in pairs(building.blockers) do
@@ -1011,8 +1061,7 @@ function BuildingHelper:StartBuilding(builder)
     building.blockers = gridNavBlockers
     building.construction_size = construction_size
     building.buildingTable = buildingTable
-    building.state = "building"
-    function building:IsUnderConstruction() return true end
+    self:AddBuildingToPlayerTable(playerID, building, true)
 
     -- Adjust the Model Orientation
     local yaw = buildingTable:GetVal("ModelRotation", "float")
@@ -1133,10 +1182,9 @@ function BuildingHelper:StartBuilding(builder)
                     -- completion: timesUp is true
                     if callbacks.onConstructionCompleted then
                         building.constructionCompleted = true
-                        building.state = "complete"
                         building.builder = builder
-                        callbacks.onConstructionCompleted(building)
                         BuildingHelper:AddBuildingToPlayerTable(playerID, building)
+                        callbacks.onConstructionCompleted(building)
                     end
 
                     -- Eject Builder
@@ -1299,6 +1347,14 @@ function BuildingHelper:StartRepair(builder, target)
     local fAddedHealth = 0
     local fHPAdjustment = 0
 
+    local repairing = {}
+    for k,v in pairs(target.units_repairing) do
+        if IsValidEntity(v) and v:IsAlive() then
+            table.insert(repairing, v)
+        end
+    end
+    target.units_repairing = repairing
+
     builder.state = "repairing"
     builder.lastRepairPosition = builder:GetAbsOrigin()
     builder:AddNewModifier(builder, repair_ability, "modifier_builder_repairing", {})
@@ -1313,15 +1369,32 @@ function BuildingHelper:StartRepair(builder, target)
     -- Repair Dynamic Tick
     if not target.repairTimer then
         target.repairTimer = Timers:CreateTimer(function()
-            local target = builder.repair_target -- This can change if the target is upgraded
-            if not IsValidEntity(target) or not target:IsAlive() then
-                if target and target.units_repairing then
-                    self:CancelRepair(target)
-                end
-                return
+            local builderCount = 0
+            for k,v in pairs(target.units_repairing) do
+                if IsValidEntity(v) and v:IsAlive() then builderCount = builderCount + 1 end
             end
 
-            local builderCount = getTableCount(target.units_repairing)
+            if not IsValidEntity(target) or not target:IsAlive() then
+                if target and target.units_repairing and not target.upgraded then
+                    self:CancelRepair(target)
+                    return
+                end
+
+                -- Redirect in case of upgrade
+                if target.upgraded and target.units_repairing then
+                    target = target.upgraded_to
+                    if not IsValidEntity(repair_ability) then
+                        repair_ability = target.units_repairing[1]:GetRepairAbility()
+                    end
+                    if not IsValidEntity(repair_ability) then
+                        self:print("Something went wrong, couldn't get a RepairAbility on the first repairing unit")
+                    else
+                        target:AddNewModifier(target, repair_ability, "modifier_repairing", {})
+                    end
+                end
+            end
+
+            target:SetModifierStackCount("modifier_repairing", target, builderCount)
             if builderCount == 0 then
                 self:CancelRepair(target)
                 return
@@ -1333,10 +1406,9 @@ function BuildingHelper:StartRepair(builder, target)
                 self:CancelRepair(target)
 
                 if IsCustomBuilding(target) and target.callbacks and target.callbacks.onConstructionCompleted then
-                    target.callbacks.onConstructionCompleted(target)
                     target.constructionCompleted = true
-                    target.state = "complete"
                     BuildingHelper:AddBuildingToPlayerTable(target:GetPlayerOwnerID(), target)
+                    target.callbacks.onConstructionCompleted(target)
                 end
 
                 self:OnRepairFinished(builder, target)
@@ -1418,39 +1490,51 @@ function BuildingHelper:GetNumBuildersRepairing(target)
     local targetPos = target:GetAbsOrigin()
     local numReparing = 0
     for _,unit in pairs(target.units_repairing) do
-        local currentPos = unit:GetAbsOrigin()
-        if not unit.lastRepairPosition then
-            unit.lastRepairPosition = currentPos
-            unit.state = "repairing"
-            numReparing = numReparing + 1
-        else
-            local changedPosition = (unit.lastRepairPosition-currentPos):Length2D() > 1
-            if changedPosition or (targetPos-currentPos):Length2D() > unit:GetFollowRange(target) then
-                unit.state = "moving_to_repair"
-                unit:MoveToNPC(target)
-            else
+        if IsValidEntity(unit) then
+            local currentPos = unit:GetAbsOrigin()
+            if not unit.lastRepairPosition then
+                unit.lastRepairPosition = currentPos
                 unit.state = "repairing"
                 numReparing = numReparing + 1
+            else
+                local changedPosition = (unit.lastRepairPosition-currentPos):Length2D() > 1
+                if changedPosition or (targetPos-currentPos):Length2D() > unit:GetFollowRange(target) then
+                    unit.state = "moving_to_repair"
+                    unit:MoveToNPC(target)
+                else
+                    unit.state = "repairing"
+                    numReparing = numReparing + 1
+                end
+                unit.lastRepairPosition = currentPos
             end
-            unit.lastRepairPosition = currentPos
         end
     end
     return numReparing
 end
 
 function BuildingHelper:CancelRepair(building)
-    building:RemoveModifierByName("modifier_repairing")
     building.repairTimer = nil
     if building.units_repairing == nil then return end
     for k,v in pairs(building.units_repairing) do
-        v:RemoveModifierByName("modifier_builder_repairing")
-        local repair_ability = BuildingHelper:GetRepairAbility(v)
-        if repair_ability and repair_ability:GetToggleState() then
-            repair_ability:ToggleAbility()
+        if IsValidEntity(v) and v:IsAlive() then
+            v:RemoveModifierByName("modifier_builder_repairing")
+            local repair_ability = BuildingHelper:GetRepairAbility(v)
+            if repair_ability and repair_ability:GetToggleState() then
+                repair_ability:ToggleAbility()
+            end
+            v.state = "idle"
+            if IsValidEntity(building) then
+                self:OnRepairCancelled(v, building)
+            end
+            BuildingHelper:AdvanceQueue(v)
         end
-        v.state = "idle"
-        self:OnRepairCancelled(v, building)
-        BuildingHelper:AdvanceQueue(v)
+    end
+
+    if IsValidEntity(building) then
+        building:RemoveModifierByName("modifier_repairing")
+        self:print("Repair of "..building:GetUnitName().." fully cancelled")
+    else
+        self:print("Building removed during the repair process")
     end
 end
 
@@ -1895,6 +1979,7 @@ function BuildingHelper:AddToQueue(builder, location, bQueued)
             -- Create the building entity that will be used to start construction and project the queue particles
             entity = CreateUnitByName(unitName, model_location, false, nil, nil, builder:GetTeam())
             entity:SetNeverMoveToClearSpace(true)
+            function entity:IsUnderConstruction() return true end
         end
         entity:AddEffects(EF_NODRAW)
         entity:AddNewModifier(entity, nil, "modifier_out_of_world", {})
@@ -1960,6 +2045,10 @@ end
     * If bQueued is false, the queue is cleared and this repair is put on top
 ]]--
 function BuildingHelper:AddRepairToQueue(builder, building, bQueued)
+    -- External pre repair checks
+    local bResult = self:OnPreRepair(builder, building)
+    if bResult == false then return end
+
     local playerID = builder:GetMainControllingPlayer()
     local player = PlayerResource:GetPlayer(playerID)
     local playerTable = BuildingHelper:GetPlayerTable(playerID)
@@ -1967,19 +2056,15 @@ function BuildingHelper:AddRepairToQueue(builder, building, bQueued)
     local buildingTable = playerTable.activeBuildingTable
     local callbacks = playerTable.activeCallbacks
 
-    -- External pre repair checks
-    local bResult = self:OnPreRepair(builder, building)
-    if bResult == false then return end
-
     BuildingHelper:print("AddRepairToQueue "..builder:GetUnitName().." "..builder:GetEntityIndex().." -> building "..building:GetUnitName())
     
     -- Make the new work entry
     local work = {["building"] = building, ["name"] = buildingName, ["buildingTable"] = buildingTable, ["callbacks"] = callbacks}
 
     -- If the ability wasn't queued, override the building queue
-    --[[if not bQueued then
+    if not bQueued then
         BuildingHelper:ClearQueue(builder)
-    end]]
+    end
 
     -- Add this to the builder queue
     table.insert(builder.buildingQueue, work)
@@ -1994,19 +2079,6 @@ function BuildingHelper:AddRepairToQueue(builder, building, bQueued)
         BuildingHelper:print("Repair Work was queued, builder already has work to do")
         BuildingHelper:PrintQueue(builder)
     end
-
-    --[[ The Cast.
-    local unit = EntIndexToHScript(entityIndex)
-    local repair_ability = BuildingHelper:GetRepairAbility(unit)
-    if repair_ability then
-        if repair_ability:IsHidden() and unit.ReturnAbility then -- Swap to the repair ability
-            unit:SwapAbilities(repair_ability:GetAbilityName(), unit.ReturnAbility:GetAbilityName(), true, false)
-        end
-
-        BuildingHelper:print("RepairCommand on "..building:GetUnitName().." "..targetIndex)
-        ExecuteOrderFromTable({UnitIndex = entityIndex, OrderType = DOTA_UNIT_ORDER_CAST_TARGET, TargetIndex = targetIndex, AbilityIndex = repair_ability:GetEntityIndex(), Queue = queue})
-    end
-    ]]
 end
 
 --[[
@@ -2039,7 +2111,6 @@ function BuildingHelper:AdvanceQueue(builder)
                 self:print("AdvanceQueue: Repair "..work.name.." "..work.building:GetEntityIndex())
 
                 -- Move towards the building until close range
-                -- TODO: The Cast. Multi Order via either Right Click or Repair Ability
                 ExecuteOrderFromTable({UnitIndex = builder:GetEntityIndex(), OrderType = DOTA_UNIT_ORDER_MOVE_TO_TARGET, TargetIndex = building:GetEntityIndex(), Queue = false}) 
                 builder.move_to_build_timer = Timers:CreateTimer(function()
                     if not IsValidEntity(builder) or not builder:IsAlive() then return end -- End if killed
@@ -2115,9 +2186,7 @@ function BuildingHelper:ClearQueue(builder)
     BuildingHelper:StopGhost(builder)
 
     -- Clear movement
-    if builder.move_to_build_timer then
-        Timers:RemoveTimer(builder.move_to_build_timer)
-    end
+    if builder.move_to_build_timer then Timers:RemoveTimer(builder.move_to_build_timer) end
 
     -- Clear repair
     if builder.repair_target then
@@ -2127,6 +2196,7 @@ function BuildingHelper:ClearQueue(builder)
             table.remove(target.units_repairing, index)
             self:print("Builder stopped repairing, currently "..getTableCount(target.units_repairing).." left.")
         end
+        builder.repair_target = nil
         self:OnRepairCancelled(builder, target)
     end
 
@@ -2305,32 +2375,79 @@ end
 
 -- Retrieves a list of all the buildings built by a player
 function BuildingHelper:GetBuildings(playerID)
-    local playerTable = BuildingHelper:GetPlayerTable(playerID)
+    local playerTable = self:GetPlayerTable(playerID)
     playerTable.BuildingHandles = playerTable.BuildingHandles or {}
     return playerTable.BuildingHandles
 end
 
+function BuildingHelper:GetBuildingsUnderConstruction(playerID)
+    local playerTable = self:GetPlayerTable(playerID)
+    playerTable.BuildingConstructionHandles = playerTable.BuildingConstructionHandles or {}
+    return playerTable.BuildingConstructionHandles
+end
+
+-- This includes both buildings completed and under construction
+function BuildingHelper:GetAllBuildings(playerID)
+    local buildings = {}
+    local finished = self:GetBuildings(playerID)
+    local construction = self:GetBuildingsUnderConstruction(playerID) 
+    for k,v in pairs(finished) do
+        table.insert(buildings, v)
+    end
+    for k,v in pairs(construction) do
+        table.insert(buildings, v)
+    end
+    return buildings
+end
+
 -- Returns number of buildings by name of a player
-function BuildingHelper:GetBuildingCount(playerID, buildingName)
-    local playerTable = BuildingHelper:GetPlayerTable(playerID)
+function BuildingHelper:GetBuildingCount(playerID, buildingName, bIncludeUnderConstruction)
+    local playerTable = self:GetPlayerTable(playerID)
     playerTable.BuildingCount = playerTable.BuildingCount or {}
     playerTable.BuildingCount[buildingName] = playerTable.BuildingCount[buildingName] or 0
-    return playerTable.BuildingCount[buildingName]
+    local count = playerTable.BuildingCount[buildingName]
+    if includeUnderConstruction then
+        playerTable.BuildingConstructionCount = playerTable.BuildingConstructionCount or {}
+        playerTable.BuildingConstructionCount[buildingName] = playerTable.BuildingConstructionCount[buildingName] or 0
+        count = count + playerTable.BuildingConstructionCount[buildingName]
+    end
+    return count
 end
 
 -- Sets the number of buildings by name of a player
-function BuildingHelper:SetBuildingCount(playerID, buildingName, number)
-    local playerTable = BuildingHelper:GetPlayerTable(playerID)
-    playerTable.BuildingCount = playerTable.BuildingCount or {}
-    playerTable.BuildingCount[buildingName] = number
+function BuildingHelper:SetBuildingCount(playerID, buildingName, number, bUnderConstruction)
+    local playerTable = self:GetPlayerTable(playerID)
+    if bUnderConstruction then
+        playerTable.BuildingConstructionCount = playerTable.BuildingConstructionCount or {}
+        playerTable.BuildingConstructionCount[buildingName] = number
+    else
+        playerTable.BuildingCount = playerTable.BuildingCount or {}
+        playerTable.BuildingCount[buildingName] = number
+    end
 end
 
 -- Store handle and increment count tracking
-function BuildingHelper:AddBuildingToPlayerTable(playerID, building)
+function BuildingHelper:AddBuildingToPlayerTable(playerID, building, bUnderConstruction)
     local buildingName = building:GetUnitName()
-    table.insert(BuildingHelper:GetBuildings(playerID), building)
-    BuildingHelper:SetBuildingCount(playerID, buildingName, BuildingHelper:GetBuildingCount(playerID, buildingName)+1)
-    function building:IsUnderConstruction() return false end
+    if bUnderConstruction then
+        building.state = "building"
+        table.insert(self:GetBuildingsUnderConstruction(playerID), building)
+        self:SetBuildingCount(playerID, buildingName, self:GetBuildingCount(playerID, buildingName, true)+1)
+        function building:IsUnderConstruction() return true end
+    else
+        -- Remove from construction
+        local buildingList = self:GetBuildingsUnderConstruction(playerID)
+        local index = getIndexTable(buildingList, building)
+        if index then
+            table.remove(buildingList, index)
+            self:SetBuildingCount(playerID, buildingName, self:GetBuildingCount(playerID, buildingName)-1)
+        end
+
+        building.state = "complete"
+        table.insert(self:GetBuildings(playerID), building)
+        self:SetBuildingCount(playerID, buildingName, self:GetBuildingCount(playerID, buildingName)+1)
+        function building:IsUnderConstruction() return false end
+    end
 end
 
 -- Returns "ConstructionSize" value of a unit handle or unit name
