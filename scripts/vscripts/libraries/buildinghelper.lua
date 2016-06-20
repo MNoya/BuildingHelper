@@ -1920,8 +1920,8 @@ function BuildingHelper:EnemyIsInsideBuildingArea(enemy_location, building_locat
         return num < upper and num > lower
     end
 
-    local betweenX = between(eBounds.Min.x, bBounds.Min.x, bBounds.Max.x) or between(eBounds.Max.x, bBounds.Min.x, bBounds.Max.x)
-    local betweenY = between(eBounds.Min.y, bBounds.Min.y, bBounds.Max.y) or between(eBounds.Max.y, bBounds.Min.y, bBounds.Max.y)
+    local betweenX = between(eBounds.Min.x, bBounds.Min.x, bBounds.Max.x) or between(eBounds.Max.x, bBounds.Min.x, bBounds.Max.x) or between(enemy_location.x,bBounds.Min.x,bBounds.Max.x)
+    local betweenY = between(eBounds.Min.y, bBounds.Min.y, bBounds.Max.y) or between(eBounds.Max.y, bBounds.Min.y, bBounds.Max.y) or between(enemy_location.y,bBounds.Min.y,bBounds.Max.y)
 
     return betweenX and betweenY
 end
