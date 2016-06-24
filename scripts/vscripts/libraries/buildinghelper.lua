@@ -1,4 +1,4 @@
-BH_VERSION = "1.2.5"
+BH_VERSION = "1.2.6"
 
 --[[
     For installation, usage and implementation examples check the wiki:
@@ -2062,7 +2062,7 @@ function BuildingHelper:AddToQueue(builder, location, bQueued)
         entity:AddNewModifier(entity, nil, "modifier_out_of_world", {})
         work.entity = entity
 
-        local modelParticle = ParticleManager:CreateParticleForPlayer("particles/buildinghelper/ghost_model.vpcf", PATTACH_ABSORIGIN, entity, player)
+        local modelParticle = ParticleManager:CreateParticleForPlayer("particles/buildinghelper/ghost_model.vpcf", PATTACH_CUSTOMORIGIN, nil, player)
         ParticleManager:SetParticleControl(modelParticle, 0, model_location)
         ParticleManager:SetParticleControlEnt(modelParticle, 1, entity, 1, "attach_hitloc", entity:GetAbsOrigin(), true) -- Model attach          
         ParticleManager:SetParticleControl(modelParticle, 3, Vector(BuildingHelper.Settings["MODEL_ALPHA"],0,0)) -- Alpha
@@ -2081,7 +2081,7 @@ function BuildingHelper:AddToQueue(builder, location, bQueued)
             local offset_location = Vector(location.x, location.y, location.z + offset)
 
             prop:AddEffects(EF_NODRAW)
-            prop.pedestalParticle = ParticleManager:CreateParticleForPlayer("particles/buildinghelper/ghost_model.vpcf", PATTACH_ABSORIGIN, prop, player)
+            prop.pedestalParticle = ParticleManager:CreateParticleForPlayer("particles/buildinghelper/ghost_model.vpcf", PATTACH_CUSTOMORIGIN, nil, player)
             ParticleManager:SetParticleControl(prop.pedestalParticle, 0, offset_location)
             ParticleManager:SetParticleControlEnt(prop.pedestalParticle, 1, prop, 1, "attach_hitloc", prop:GetAbsOrigin(), true) -- Model attach
             ParticleManager:SetParticleControl(prop.pedestalParticle, 2, color) -- Color
@@ -2517,7 +2517,8 @@ function BuildingHelper:AddBuildingToPlayerTable(playerID, building, bUnderConst
         local index = getIndexTable(buildingList, building)
         if index then
             table.remove(buildingList, index)
-            self:SetBuildingCount(playerID, buildingName, self:GetBuildingCount(playerID, buildingName)-1)
+            local constructionCount = self:GetBuildingCount(playerID, buildingName, true)
+            self:SetBuildingCount(playerID, buildingName, constructionCount-1, true)
         end
 
         building.state = "complete"
