@@ -1,4 +1,4 @@
-BH_VERSION = "1.2.6"
+BH_VERSION = "1.2.7"
 
 --[[
     For installation, usage and implementation examples check the wiki:
@@ -13,10 +13,7 @@ if not BuildingHelper then
     BuildingHelper = class({})
 end
 
---[[
-    BuildingHelper Init
-    * Loads Key Values into the BuildingAbilities
-]]--
+-- Loads Key Values into the BuildingAbilities
 function BuildingHelper:Init()
     -- building_settings nettable from buildings.kv
     BuildingHelper:LoadSettings()
@@ -58,6 +55,7 @@ function BuildingHelper:Init()
     LinkLuaModifier("modifier_disable_turning", "libraries/modifiers/modifier_disable_turning", LUA_MODIFIER_MOTION_NONE)
     LinkLuaModifier("modifier_repairing", "libraries/modifiers/repair_modifiers", LUA_MODIFIER_MOTION_NONE)
     LinkLuaModifier("modifier_builder_repairing", "libraries/modifiers/repair_modifiers", LUA_MODIFIER_MOTION_NONE)
+    LinkLuaModifier("modifier_tree_cut", "libraries/modifiers/modifier_tree_cut", LUA_MODIFIER_MOTION_NONE)
     
     -- Check KVs and set relevant construction_size nettable values
     self:ParseKV()
@@ -76,6 +74,9 @@ function BuildingHelper:OnScriptReload()
     BuildingHelper:LoadSettings()
     if BuildingHelper.Settings["REPAIR_PATH"] then
         require(BuildingHelper.Settings["REPAIR_PATH"])
+    end
+    if BuildingHelper.Settings["BUILD_PATH"] then
+        require(BuildingHelper.Settings["BUILD_PATH"])
     end
 end
 
@@ -279,15 +280,9 @@ function BuildingHelper:OnTreeCut(keys)
     end
 
     -- Create a dummy for clients to be able to detect trees standing and block their grid
-    tree.chopped_dummy = CreateUnitByName("npc_dota_thinker", treePos, false, nil, nil, 0)
+    tree.chopped_dummy = CreateUnitByName("npc_dota_units_base", treePos, false, nil, nil, 0)
+    tree.chopped_dummy:AddNewModifier(tree.chopped_dummy,nil,"modifier_tree_cut",{})
     BuildingHelper.TreeDummies[tree:GetEntityIndex()] = tree.chopped_dummy
-
-    local tree_ability = tree.chopped_dummy:AddAbility("dummy_tree")
-    if not tree_ability then
-        BuildingHelper:print("ERROR: dummy_tree ability is missing!")
-    else
-        tree_ability:SetLevel(1)
-    end
 
     -- Allow construction
     if not GridNav:IsBlocked(treePos) then
@@ -313,7 +308,7 @@ function BuildingHelper:InitGNV()
     local boundY2 = GridNav:WorldToGridPosY(worldMax.y)
    
     BuildingHelper:print("Max World Bounds: ")
-    BuildingHelper:print(GetWorldMaxX()..' '..GetWorldMaxY()..' '..GetWorldMaxX()..' '..GetWorldMaxY())
+    BuildingHelper:print(GetWorldMinX()..' '..GetWorldMaxX()..' '..GetWorldMinY()..' '..GetWorldMaxY())
     BuildingHelper:print(boundX1..' '..boundX2..' '..boundY1..' '..boundY2)
 
     local blockedCount = 0
@@ -426,7 +421,6 @@ end
 
 -- Used to find the closest builder to a building location
 local GetClosestToPosition = function(unitList, position)
-    local t = {}
     local distance = math.huge
     local closest
     for _,unit in pairs(unitList) do
@@ -439,10 +433,7 @@ local GetClosestToPosition = function(unitList, position)
     return closest
 end
 
---[[
-    BuildCommand
-    * Detects a Left Click with a builder through Panorama
-]]--
+-- Detects a Left Click with a builder through Panorama
 function BuildingHelper:BuildCommand(args)
     local playerID = args['PlayerID']
     local x = args['X']
@@ -482,10 +473,7 @@ function BuildingHelper:BuildCommand(args)
     BuildingHelper:AddToQueue(builder, location, queue)
 end
 
---[[
-    CancelCommand
-    * Detects a Right Click/Tab with a builder through Panorama
-]]--
+-- Detects a Right Click/Tab with a builder through Panorama
 function BuildingHelper:CancelCommand(args)
     local playerID = args.PlayerID
     local playerTable = BuildingHelper:GetPlayerTable(playerID)
@@ -500,6 +488,7 @@ function BuildingHelper:CancelCommand(args)
     end
 end
 
+-- Detects a RightClick on a building with health deficit
 function BuildingHelper:RepairCommand(args)
     local playerID = args.PlayerID
     local building = EntIndexToHScript(args.targetIndex)
@@ -625,10 +614,7 @@ function BuildingHelper:OrderFilter(order)
     return ret
 end    
 
---[[
-      InitializeBuilder
-      * Manages each workers build queue. Will run once per builder
-]]--
+-- Manages each workers build queue. Will run once per builder
 function BuildingHelper:InitializeBuilder(builder)
     BuildingHelper:print("InitializeBuilder "..builder:GetUnitName().." "..builder:GetEntityIndex())
 
@@ -645,11 +631,8 @@ function BuildingHelper:RemoveBuilder(builder)
     CustomNetTables:SetTableValue("builders", tostring(builder:GetEntityIndex()), { IsBuilder = false })
 end
 
---[[
-    AddBuilding
-    * Makes a building dummy and starts panorama ghosting
-    * Builder calls this and sets the callbacks with the required values
-]]--
+-- Makes a building dummy and starts panorama ghosting
+-- Builder calls this and sets the callbacks with the required values
 function BuildingHelper:AddBuilding(keys)
     -- Callbacks
     local callbacks = BuildingHelper:SetCallbacks(keys)
@@ -737,10 +720,7 @@ function BuildingHelper:AddBuilding(keys)
     CustomGameEventManager:Send_ServerToPlayer(player, "building_helper_enable", event)
 end
 
---[[
-    SetCallbacks
-    * Defines a series of callbacks to be returned in the builder module
-]]--
+-- Defines a series of callbacks to be returned in the builder module
 function BuildingHelper:SetCallbacks(keys)
     local callbacks = {}
 
@@ -779,10 +759,7 @@ function BuildingHelper:SetCallbacks(keys)
     return callbacks
 end
 
---[[
-    SetupBuildingTable
-    * Setup building table, returns a constructed table.
-]]--
+-- Setup building table, returns a constructed table.
 function BuildingHelper:SetupBuildingTable(abilityName, builderHandle)
 
     local buildingTable = GetKeyValue(abilityName)
@@ -925,13 +902,16 @@ function BuildingHelper:SetupBuildingTable(abilityName, builderHandle)
     return buildingTable
 end
 
---[[
-    PlaceBuilding
-    * Places a new building on full health and returns the handle. 
-    * Places grid nav blockers
-    * Skips the construction phase and doesn't require a builder, this is most important to place the "base" buildings for the players when the game starts.
-    * Make sure the position is valid before calling this in code.
-]]--
+-- Sends a builder to start the construction of a building
+function BuildingHelper:OrderBuildingConstruction(builder, ability, position)
+    ExecuteOrderFromTable({UnitIndex = builder:GetEntityIndex(), OrderType = DOTA_UNIT_ORDER_STOP, Queue = false}) 
+    Build({caster=builder, ability=ability})
+    BuildingHelper:AddToQueue(builder, position, false)
+end
+
+-- Places a new building on full health and returns the handle. Places grid nav blockers
+-- Skips the construction phase and doesn't require a builder, this is most important to place the "base" buildings for the players when the game starts.
+-- Make sure the position is valid before calling this in code.
 function BuildingHelper:PlaceBuilding(player, name, location, construction_size, pathing_size, angle)
     construction_size = construction_size or BuildingHelper:GetConstructionSize(name)
     pathing_size = pathing_size or BuildingHelper:GetBlockPathingSize(name)
@@ -987,10 +967,7 @@ function BuildingHelper:PlaceBuilding(player, name, location, construction_size,
     return building
 end
 
---[[
-    UpgradeBuilding
-    * Replaces a building by a new one by name, updating the necessary references and returning the new created unit
-]]
+-- Replaces a building by a new one by name, updating the necessary references and returning the new created unit
 function BuildingHelper:UpgradeBuilding(building, newName)
     local oldBuildingName = building:GetUnitName()
     BuildingHelper:print("Upgrading Building: "..oldBuildingName.." -> "..newName)
@@ -1021,10 +998,7 @@ function BuildingHelper:UpgradeBuilding(building, newName)
     return new_building
 end
 
---[[
-    RemoveBuilding
-    * Removes a building, removing it from the gridnav, with an optional parameter to skip particle effects
-]]--
+-- Removes a building, removing it from the gridnav, with an optional parameter to skip particle effects
 function BuildingHelper:RemoveBuilding(building, bSkipEffects)
     local buildingName = building:GetUnitName()
     BuildingHelper:print("Removing Building: "..buildingName)
@@ -1060,7 +1034,8 @@ function BuildingHelper:RemoveBuilding(building, bSkipEffects)
         index = getIndexTable(buildingList, building)
         if index then
             table.remove(buildingList, index)
-            BuildingHelper:SetBuildingCount(playerID, buildingName, BuildingHelper:GetBuildingCount(playerID, buildingName)-1)
+            local constructionCount = self:GetBuildingCount(playerID, buildingName, true)
+            self:SetBuildingCount(playerID, buildingName, constructionCount-1, true)
         end
     end
 
@@ -1070,10 +1045,7 @@ function BuildingHelper:RemoveBuilding(building, bSkipEffects)
     end
 end
 
---[[
-      StartBuilding
-      * Creates the building and starts the construction process
-]]--
+-- Creates the building and starts the construction process
 function BuildingHelper:StartBuilding(builder)
     local playerID = builder:GetMainControllingPlayer()
     local work = builder.work
@@ -1124,6 +1096,11 @@ function BuildingHelper:StartBuilding(builder)
     local pedestal = GetUnitKV(unitName, "PedestalModel")
     if pedestal then
         BuildingHelper:CreatePedestalForBuilding(building, unitName, location, pedestal)
+    end
+
+    -- Add building ability
+    if not building:HasAbility("ability_building") then
+        building:AddAbility("ability_building")
     end
 
     -- Initialize the building
@@ -1377,10 +1354,7 @@ function BuildingHelper:StartBuilding(builder)
     BuildingHelper:ClearWorkParticles(work)
 end
 
---[[
-      StartRepair
-      * Starts the repair process when the builder is on range of the target
-]]--
+-- Starts the repair process when the builder is on range of the target
 function BuildingHelper:StartRepair(builder, target)
     local work = builder.work
     local underConstruction = IsCustomBuilding(target) and target:IsUnderConstruction() -- For RequiresRepair building behaviour
@@ -1546,7 +1520,7 @@ function BuildingHelper:StartRepair(builder, target)
                 end
                 
                 if bCanPayResource then
-                    self:print("Repaired "..target:GetUnitName().." with "..builderCount.." builders for "..hpGain.." | Time Factor: "..buildTimeFactor.." | Cost Factor: "..buildCostFactor)
+                    --self:print("Repaired "..target:GetUnitName().." with "..builderCount.." builders for "..hpGain.." | Time Factor: "..buildTimeFactor.." | Cost Factor: "..buildCostFactor)
                     target:SetHealth(target:GetHealth() + hpGain)
                 else
                     self:print("Repair Ended, not enough resources!")
@@ -1574,7 +1548,7 @@ function BuildingHelper:GetNumBuildersRepairing(target)
                 numReparing = numReparing + 1
             else
                 local changedPosition = (unit.lastRepairPosition-currentPos):Length2D() > 1
-                if changedPosition or (targetPos-currentPos):Length2D() > unit:GetFollowRange(target) then
+                if changedPosition or (targetPos-currentPos):Length2D() > (unit.repairRange or unit:GetFollowRange(target)) then
                     unit.state = "moving_to_repair"
                     unit:MoveToNPC(target)
                 else
@@ -1615,12 +1589,9 @@ function BuildingHelper:CancelRepair(building)
     end
 end
 
---[[
-      BlockGridSquares
-      * Blocks a square of certain construction and pathing size at a location on the server grid
-      * construction_size: square of grid points to block from construction
-      * pathing_size: square of pathing obstructions that will be spawned 
-]]--
+-- Blocks a square of certain construction and pathing size at a location on the server grid
+-- construction_size: square of grid points to block from construction
+-- pathing_size: square of pathing obstructions that will be spawned 
 function BuildingHelper:BlockGridSquares(construction_size, pathing_size, location)
     BuildingHelper:RemoveGridType(construction_size, location, "BUILDABLE")
     BuildingHelper:AddGridType(construction_size, location, "BLOCKED")
@@ -1850,17 +1821,14 @@ function BuildingHelper:CellHasGridType(x, y, grid_type)
     end
 end
 
---[[
-      ValidPosition
-      * Checks GridNav square of certain size at a location
-      * Sends onConstructionFailed if invalid
-]]--
+-- Checks GridNav square of certain size at a location. Sends onConstructionFailed if invalid
 function BuildingHelper:ValidPosition(size, location, unit, callbacks)
     local bBlocked
 
     -- Check for special requirement
     local playerTable = BuildingHelper:GetPlayerTable(unit:GetPlayerOwnerID())
     local buildingName = playerTable.activeBuilding
+    if unit.work then buildingName = unit.work.name end
     local buildingTable = buildingName and GetUnitKV(buildingName)
     local requires = buildingTable and buildingTable["Requires"]
     local prevents = buildingTable and buildingTable["Prevents"]
@@ -1991,12 +1959,9 @@ function BuildingHelper:AreaMeetsCriteria(size, location, grid_type, option)
     end
 end
 
---[[
-    AddToQueue
-    * Adds a location to the builders work queue
-    * bQueued will be true if the command was done with shift pressed
-    * If bQueued is false, the queue is cleared and this building is put on top
-]]--
+-- Adds a location to the builders work queue
+-- bQueued will be true if the command was done with shift pressed
+-- If bQueued is false, the queue is cleared and this building is put on top
 function BuildingHelper:AddToQueue(builder, location, bQueued)
     local playerID = builder:GetMainControllingPlayer()
     local player = PlayerResource:GetPlayer(playerID)
@@ -2115,12 +2080,9 @@ function BuildingHelper:AddToQueue(builder, location, bQueued)
     end
 end
 
---[[
-    AddRepairToQueue
-    * Adds a repair to the builders work queue
-    * bQueued will be true if the command was done with shift pressed
-    * If bQueued is false, the queue is cleared and this repair is put on top
-]]--
+-- Adds a repair to the builders work queue
+-- bQueued will be true if the command was done with shift pressed
+-- If bQueued is false, the queue is cleared and this repair is put on top
 function BuildingHelper:AddRepairToQueue(builder, building, bQueued)
     -- External pre repair checks
     local bResult = self:OnPreRepair(builder, building)
@@ -2158,10 +2120,7 @@ function BuildingHelper:AddRepairToQueue(builder, building, bQueued)
     end
 end
 
---[[
-      AdvanceQueue
-      * Processes an item of the builders work queue
-]]--
+-- Processes an item of the builders work queue
 function BuildingHelper:AdvanceQueue(builder)
     if (builder.move_to_build_timer) then Timers:RemoveTimer(builder.move_to_build_timer) end
 
@@ -2250,10 +2209,7 @@ function BuildingHelper:AdvanceQueue(builder)
     end
 end
 
---[[
-    ClearQueue
-    * Clear the build queue, the player right clicked
-]]--
+-- Clear the build queue, the player right clicked
 function BuildingHelper:ClearQueue(builder)
 
     local work = builder.work
@@ -2335,20 +2291,14 @@ function BuildingHelper:ClearWorkParticles(work)
     if work.propParticleIndex then ParticleManager:DestroyParticle(work.propParticleIndex, true) end
 end
 
---[[
-    StopGhost
-    * Stop panorama ghost
-]]--
+-- Stop panorama ghost
 function BuildingHelper:StopGhost(builder)
     local player = builder:GetPlayerOwner()
     
     CustomGameEventManager:Send_ServerToPlayer(player, "building_helper_end", {})
 end
 
---[[
-    PrintQueue
-    * Shows the current queued work for this builder
-]]--
+-- Shows the current queued work for this builder
 function BuildingHelper:PrintQueue(builder)
     BuildingHelper:print("Builder Queue of "..builder:GetUnitName().. " "..builder:GetEntityIndex())
     local buildingQueue = builder.buildingQueue
