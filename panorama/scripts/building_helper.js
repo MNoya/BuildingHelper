@@ -10,6 +10,7 @@ var overlay_size = 0;
 var range = 0;
 var pressedShift = false;
 var altDown = false;
+var invalid = false;
 var requires;
 var modelParticle;
 var propParticle;
@@ -161,7 +162,7 @@ function StartBuildingHelper( params )
         entityGrid = []
         for (var i = 0; i < entities.length; i++)
         {
-            if (!Entities.IsAlive(entities[i]) || Entities.IsOutOfGame(entities[i])) continue
+            if (!Entities.IsAlive(entities[i]) || Entities.IsOutOfGame(entities[i]) || !HasModifier(entities[i], "modifier_building")) continue
             var entPos = Entities.GetAbsOrigin( entities[i] )
             var squares = GetConstructionSize(entities[i])
             
@@ -179,7 +180,7 @@ function StartBuildingHelper( params )
                         cutTrees[entPos] = entities[i]
                 }
                 // Block 2x2 squares if its an enemy unit
-                else if (Entities.GetTeamNumber(entities[i]) != Entities.GetTeamNumber(builderIndex))
+                else if (Entities.GetTeamNumber(entities[i]) != Entities.GetTeamNumber(builderIndex) && !HasModifier(entities[i], "modifier_out_of_world"))
                 {
                     BlockGridSquares(entPos, 2, GRID_TYPES["BLOCKED"])
                 }
@@ -230,7 +231,7 @@ function StartBuildingHelper( params )
         {
             SnapToGrid(GamePos, size)
 
-            var invalid;
+            invalid = false
             var color = [0,255,0]
             var part = 0
             var halfSide = (size/2)*64
@@ -407,6 +408,12 @@ function EndBuildingHelper()
 
 function SendBuildCommand( params )
 {
+    if (invalid)
+    {
+        CreateErrorMessage({message:"#error_invalid_build_position"})
+        return true
+    }
+
     pressedShift = GameUI.IsShiftDown();
     var mainSelected = Players.GetLocalPlayerPortraitUnit(); 
 
@@ -428,6 +435,17 @@ function SendCancelCommand( params )
 {
     EndBuildingHelper();
     GameEvents.SendCustomGameEventToServer( "building_helper_cancel_command", {} );
+}
+
+function CreateErrorMessage(msg)
+{
+    var reason = msg.reason || 80;
+    if (msg.message){
+        GameEvents.SendEventClientSide("dota_hud_error_message", {"splitscreenplayer":0,"reason":reason ,"message":msg.message} );
+    }
+    else{
+        GameEvents.SendEventClientSide("dota_hud_error_message", {"splitscreenplayer":0,"reason":reason} );
+    }
 }
 
 function RegisterGNV(msg){
@@ -617,9 +635,9 @@ function BlockGridInRadius (position, radius, gridType) {
     boundingRect["topBorderY"] = position[1]+radius
     boundingRect["bottomBorderY"] = position[1]-radius
 
-    for (var x=boundingRect["leftBorderX"]; x <= boundingRect["rightBorderX"]-32; x+=64)
+    for (var x=boundingRect["leftBorderX"]+32; x <= boundingRect["rightBorderX"]+32; x+=64)
     {
-        for (var y=boundingRect["topBorderY"]-32; y >= boundingRect["bottomBorderY"]; y-=64)
+        for (var y=boundingRect["topBorderY"]+32; y >= boundingRect["bottomBorderY"]+32; y-=64)
         {
             if (Length2D(position, [x,y]) <= radius)
             {
@@ -639,13 +657,13 @@ function WorldToGridPosY(y){
 
 function GetConstructionSize(entIndex) {
     var entName = Entities.GetUnitName(entIndex)
-    var table = CustomNetTables.GetTableValue( "construction_size", entName)
+    var table = CustomNetTables.GetTableValue("construction_size", entName)
     return table ? table.size : 0
 }
 
 function GetRequiredGridType(entIndex) {
     var entName = Entities.GetUnitName(entIndex)
-    var table = CustomNetTables.GetTableValue( "construction_size", entName)
+    var table = CustomNetTables.GetTableValue("construction_size", entName)
     if (table && table.requires !== undefined)
     {
         var types = table.requires.split(" ")
@@ -662,14 +680,19 @@ function GetRequiredGridType(entIndex) {
 
 function GetCustomGrid(entIndex) {
     var entName = Entities.GetUnitName(entIndex)
-    var table = CustomNetTables.GetTableValue( "construction_size", entName)
+    var table = CustomNetTables.GetTableValue("construction_size", entName)
     if (table && table.grid !== undefined)
-        return table.grid
+    {
+        var gridType = table.grid
+        for (var type in gridType)
+            if (HasModifier(entIndex, "modifier_grid_"+type.toLowerCase()))
+                return table.grid
+    }    
 }
 
 function HasGoldMineDistanceRestriction(entIndex) {
     var entName = Entities.GetUnitName(entIndex)
-    var table = CustomNetTables.GetTableValue( "construction_size", entName)
+    var table = CustomNetTables.GetTableValue("construction_size", entName)
     return table ? table.distance_to_gold_mine : 0
 }
 
