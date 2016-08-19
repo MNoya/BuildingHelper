@@ -1,4 +1,4 @@
-BH_VERSION = "1.2.8"
+BH_VERSION = "1.2.9"
 
 --[[
     For installation, usage and implementation examples check the wiki:
@@ -250,7 +250,7 @@ function BuildingHelper:OnEntityKilled(keys)
 
         if gridTable then
             for grid_type,v in pairs(gridTable) do
-                if tobool(v.RemoveOnDeath) then
+                if tobool(v.RemoveOnDeath) then --Only use if there is no overlapping!
                     local location = killed:GetAbsOrigin()
                     BuildingHelper:print("Clearing special grid of "..grid_type)
                     if (v.Radius) then
@@ -567,6 +567,9 @@ function BuildingHelper:OrderFilter(order)
 
     -- Stop and Hold
     elseif order_type == DOTA_UNIT_ORDER_STOP or order_type == DOTA_UNIT_ORDER_HOLD_POSITION then
+        if unit and IsBuilder(unit) then --Hold Stops instead
+            order.order_type = DOTA_UNIT_ORDER_STOP
+        end
         for n, unit_index in pairs(units) do 
             local unit = EntIndexToHScript(unit_index)
             if IsBuilder(unit) then
@@ -692,8 +695,7 @@ function BuildingHelper:AddBuilding(keys)
     event.modelOffset = GetUnitKV(unitName, "ModelOffset") or 0
 
     -- npc_dota_creature doesn't render cosmetics on the particle ghost, use hero names instead
-    local overrideGhost = buildingTable:GetVal("OverrideBuildingGhost", "string")
-    unitName = overrideGhost or unitName
+    unitName = GetUnitKV(unitName, "OverrideBuildingGhost") or unitName
 
     -- Get a model dummy to pass it to panorama
     local mgd = BuildingHelper:GetOrCreateDummy(unitName)
@@ -2069,7 +2071,7 @@ end
 function BuildingHelper:AddRepairToQueue(builder, building, bQueued)
     -- External pre repair checks
     local bResult = self:OnPreRepair(builder, building)
-    if bResult == false then return end
+    if not bResult then return end
 
     local playerID = builder:GetMainControllingPlayer()
     local player = PlayerResource:GetPlayer(playerID)
