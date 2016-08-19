@@ -2502,7 +2502,7 @@ function BuildingHelper:ShowBuilder(unit)
 end
 
 -- Find the closest position of construction_size, within maxDistance
-function BuildingHelper:FindClosestEmptyPositionNearby(location, construction_size, maxDistance)
+function BuildingHelper:FindClosestEmptyPositionNearby(location, construction_size, maxDistance, avoidUnits)
     local originX = GridNav:WorldToGridPosX(location.x)
     local originY = GridNav:WorldToGridPosY(location.y)
 
@@ -2539,8 +2539,16 @@ function BuildingHelper:FindClosestEmptyPositionNearby(location, construction_si
                 if BuildingHelper:MeetsHeightCondition(pos) and not BuildingHelper:IsAreaBlocked(construction_size, pos) then
                     local distance = (pos - location):Length2D()
                     if distance < closestDistance then
-                        towerPos = pos
-                        closestDistance = distance
+                        if avoidUnits then
+                            local units = FindUnitsInRadius(DOTA_TEAM_GOODGUYS, pos, nil, 64, DOTA_UNIT_TARGET_TEAM_BOTH, DOTA_UNIT_TARGET_BASIC+DOTA_UNIT_TARGET_HERO, DOTA_UNIT_TARGET_FLAG_MAGIC_IMMUNE_ENEMIES, FIND_ANY_ORDER, false)
+                            if #units == 0 then
+                                towerPos = pos
+                                closestDistance = distance
+                            end
+                        else
+                            towerPos = pos
+                            closestDistance = distance
+                        end                        
                     end
                 end
             end
@@ -2644,8 +2652,9 @@ function getIndexTable(list, element)
     for k,v in pairs(list) do if v == element then return k end end
 end
 
-function DrawGridSquare(x, y, color)
+function DrawGridSquare(x, y, color, duration)
     local pos = Vector(GridNav:GridPosToWorldCenterX(x), GridNav:GridPosToWorldCenterY(y), 0)
+    duration = duration or 10
     BuildingHelper:SnapToGrid(1, pos)
     pos = GetGroundPosition(pos, nil)
         
@@ -2655,7 +2664,7 @@ function DrawGridSquare(x, y, color)
     ParticleManager:SetParticleControl(particle, 2, color)
     ParticleManager:SetParticleControl(particle, 3, Vector(90,0,0))
 
-    Timers:CreateTimer(10, function() 
+    Timers:CreateTimer(duration, function() 
         ParticleManager:DestroyParticle(particle, true)
     end)
 end
